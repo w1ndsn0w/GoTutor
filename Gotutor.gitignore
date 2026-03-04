@@ -1,0 +1,36 @@
+# ========================
+# Xcode 默认生成的无用文件
+# ========================
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+project.xcworkspace/
+
+# ========================
+# macOS 系统的隐藏垃圾文件
+# ========================
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ========================
+# 🚨 GoTutor 专属屏蔽：AI 权重模型
+# ========================
+# 忽略所有的 gzip 压缩模型文件，防止撑爆 GitHub 仓库
+*.bin.gz
+
+# 如果你连配置文件也不想传，可以把下面这行的注释（#）去掉
+# *.cfg
