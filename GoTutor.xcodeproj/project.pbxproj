@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		20E595C02F5AAE8D00690FCB /* Gotutor.gitignore in Resources */ = {isa = PBXBuildFile; fileRef = 20E595BF2F5AAE6200690FCB /* Gotutor.gitignore */; };
+		20E595C02F5AAE8D00690FCB /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = 20E595BF2F5AAE6200690FCB /* .gitignore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		20D12D3A2F5807D90045B426 /* GoTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GoTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		20E595BF2F5AAE6200690FCB /* Gotutor.gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gotutor.gitignore; sourceTree = "<group>"; };
+		20E595BF2F5AAE6200690FCB /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -37,7 +37,7 @@
 		20D12D312F5807D90045B426 = {
 			isa = PBXGroup;
 			children = (
-				20E595BF2F5AAE6200690FCB /* Gotutor.gitignore */,
+				20E595BF2F5AAE6200690FCB /* .gitignore */,
 				20D12D3C2F5807D90045B426 /* GoTutor */,
 				20D12D3B2F5807D90045B426 /* Products */,
 			);
@@ -116,7 +116,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				20E595C02F5AAE8D00690FCB /* Gotutor.gitignore in Resources */,
+				20E595C02F5AAE8D00690FCB /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
