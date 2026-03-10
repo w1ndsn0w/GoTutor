@@ -315,8 +315,8 @@ struct PrisonerPill: View {
             Text("\(count) 子").font(.system(size: 14, weight: .semibold)).monospacedDigit()
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(isBlack ? Color.black.opacity(0.1) : Color.white, in: Capsule())
-        .overlay(Capsule().stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+        .background(Color.primary.opacity(0.6), in: Capsule())
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
 
@@ -411,3 +411,4 @@ struct GoGameDocument: FileDocument {
         return .init(regularFileWithContents: data)
     }
 }
+

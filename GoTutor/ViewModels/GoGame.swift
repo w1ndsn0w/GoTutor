@@ -186,64 +186,79 @@ final class GoGame: ObservableObject {
     }
     
     private func executeBlunderCheck(forTurn targetTurn: Int) {
-        guard isTutorMode, targetTurn > 0 else {
-            isAnalyzingTutor = false
-            return
-        }
-        guard checkedTurnForTutor != targetTurn else { return }
-        
-        let isLatestHumanMove = (targetTurn == currentTurn) || (isAIBattleMode && targetTurn == currentTurn - 1)
-        guard isLatestHumanMove else { return }
-        guard let current = moveAnalyses[targetTurn], let previous = moveAnalyses[targetTurn - 1] else { return }
-        
-        checkedTurnForTutor = targetTurn
-        isAnalyzingTutor = false
-        
-        let actualMove = moves[targetTurn - 1]
-        var actualPt: Point? = nil
-        if case .place(let p) = actualMove.kind { actualPt = p }
-        
-        let lastPlayer = actualMove.player
-        let wrDrop = lastPlayer == .black ? (previous.winrate - current.winrate) : (current.winrate - previous.winrate)
-        let slDrop = lastPlayer == .black ? (previous.scoreLead - current.scoreLead) : (current.scoreLead - previous.scoreLead)
-        
-        if let actual = actualPt, let best = previous.bestMove, actual != best && wrDrop > 0.05 {
-            let wrPercent = String(format: "%.1f%%", wrDrop * 100)
-            let slPoints = String(format: "%.1f", slDrop)
-            let rating = wrDrop > 0.20 ? "惊天大恶手 📉" : "缓手/失误 ⚠️"
+            guard isTutorMode, targetTurn > 0 else {
+                isAnalyzingTutor = false
+                return
+            }
+            guard checkedTurnForTutor != targetTurn else {
+                isAnalyzingTutor = false // 增加防御：已检查过则关闭转圈
+                return
+            }
             
-            blunderMessage = "\(rating)\n胜率暴跌 \(wrPercent) (亏损 \(slPoints) 目)"
-            previousBestMove = best
-            tutorExplanation = ""
-            isTutorThinking = true
+            let isLatestHumanMove = (targetTurn == currentTurn) || (isAIBattleMode && targetTurn == currentTurn - 1)
+            guard isLatestHumanMove else {
+                isAnalyzingTutor = false // 增加防御：非最新手则关闭转圈
+                return
+            }
             
-            let colorStr = lastPlayer == .black ? "黑棋" : "白棋"
-            let actualStr = toGTPCoordinate(r: actual.r, c: actual.c)
-            let bestStr = toGTPCoordinate(r: best.r, c: best.c)
-            let prompt = "当前第 \(targetTurn) 手，人类执\(colorStr)下在 \(actualStr)，导致胜率暴跌 \(wrPercent)（亏损 \(slPoints) 目）。KataGo 推荐的最佳选点是 \(bestStr)。请点评。"
+            guard let current = moveAnalyses[targetTurn], let previous = moveAnalyses[targetTurn - 1] else {
+                // 🚨 核心修复：如果是复盘模式且缺失数据，直接解除转圈锁定
+                if isReviewMode { isAnalyzingTutor = false }
+                return
+            }
             
-            Task {
-                do {
-                    let stream = AITutorNetworkManager.shared.fetchExplanationStream(prompt: prompt)
-                    for try await chunk in stream {
-                        DispatchQueue.main.async { self.tutorExplanation += chunk }
-                    }
-                    DispatchQueue.main.async { self.isTutorThinking = false }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.tutorExplanation = "网络请求失败，请检查 API Key..."
-                        self.isTutorThinking = false
+            checkedTurnForTutor = targetTurn
+            isAnalyzingTutor = false // 正常流程中，拿到数据后立即关闭转圈
+            
+            let actualMove = moves[targetTurn - 1]
+            var actualPt: Point? = nil
+            if case .place(let p) = actualMove.kind { actualPt = p }
+            
+            let lastPlayer = actualMove.player
+            
+            if !isReviewMode && lastPlayer == aiPlayerColor {
+                return
+            }
+            
+            let wrDrop = lastPlayer == .black ? (previous.winrate - current.winrate) : (current.winrate - previous.winrate)
+            let slDrop = lastPlayer == .black ? (previous.scoreLead - current.scoreLead) : (current.scoreLead - previous.scoreLead)
+            
+            if let actual = actualPt, let best = previous.bestMove, actual != best && wrDrop > 0.05 {
+                let wrPercent = String(format: "%.1f%%", wrDrop * 100)
+                let slPoints = String(format: "%.1f", slDrop)
+                let rating = wrDrop > 0.20 ? "惊天大恶手 📉" : "缓手/失误 ⚠️"
+                
+                blunderMessage = "\(rating)\n胜率暴跌 \(wrPercent) (亏损 \(slPoints) 目)"
+                previousBestMove = best
+                tutorExplanation = ""
+                isTutorThinking = true
+                
+                let colorStr = lastPlayer == .black ? "黑棋" : "白棋"
+                let actualStr = toGTPCoordinate(r: actual.r, c: actual.c)
+                let bestStr = toGTPCoordinate(r: best.r, c: best.c)
+                let prompt = "当前第 \(targetTurn) 手，人类执\(colorStr)下在 \(actualStr)，导致胜率暴跌 \(wrPercent)（亏损 \(slPoints) 目）。KataGo 推荐的最佳选点是 \(bestStr)。请点评。"
+                
+                Task {
+                    do {
+                        let stream = AITutorNetworkManager.shared.fetchExplanationStream(prompt: prompt)
+                        for try await chunk in stream {
+                            DispatchQueue.main.async { self.tutorExplanation += chunk }
+                        }
+                        DispatchQueue.main.async { self.isTutorThinking = false }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.tutorExplanation = "网络请求失败，请检查 API Key..."
+                            self.isTutorThinking = false
+                        }
                     }
                 }
+            } else {
+                blunderMessage = nil
+                previousBestMove = nil
+                tutorExplanation = ""
+                isTutorThinking = false
             }
-        } else {
-            blunderMessage = nil
-            previousBestMove = nil
-            tutorExplanation = ""
-            isTutorThinking = false
         }
-    }
-    
     private func updateReviewHint() {
         guard isReviewMode, currentTurn > 0 else { reviewBestMoveHint = nil; return }
         guard let currentAnalysis = moveAnalyses[currentTurn], let prevAnalysis = moveAnalyses[currentTurn - 1], let aiBest = prevAnalysis.bestMove else { reviewBestMoveHint = nil; return }
@@ -330,7 +345,7 @@ final class GoGame: ObservableObject {
             let data = try Data(contentsOf: url); let savedGame = try JSONDecoder().decode(SavedGame.self, from: data)
             self.moves = savedGame.moves; self.moveAnalyses = savedGame.analyses; self.isReviewMode = true
             
-            if !self.moveAnalyses.isEmpty && self.moveAnalyses.count >= self.moves.count {
+            if !self.moveAnalyses.isEmpty && self.moveAnalyses.count > self.moves.count {
                 self.analysisProgress = 1.0
             } else {
                 self.analysisProgress = 0.0
