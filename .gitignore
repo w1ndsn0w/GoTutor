@@ -25,7 +25,6 @@ project.xcworkspace/
 .DS_Store
 .AppleDouble
 .LSOverride
-**/libkatago.a
 # ========================
 # 🚨 GoTutor 专属屏蔽：AI 权重模型
 # ========================
@@ -34,3 +33,6 @@ project.xcworkspace/
 
 # 如果你连配置文件也不想传，可以把下面这行的注释（#）去掉
 # *.cfg
+
+GoTutor/Resources/model.bin.gz
+GoTutor/KataGoCore/libkatago.a
