@@ -391,7 +391,7 @@ struct CleanWhiteToggleStyle: ToggleStyle {
     }
 }
 // MARK: - SwiftUI 文件导出支持
-struct GoGameDocument: FileDocument {
+struct GoGameDocument: FileDocument, Sendable {
     static var readableContentTypes: [UTType] { [.json] }
     var savedGame: SavedGame
 
@@ -399,15 +399,15 @@ struct GoGameDocument: FileDocument {
         self.savedGame = savedGame
     }
 
-    init(configuration: ReadConfiguration) throws {
+    nonisolated init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        self.savedGame = try JSONDecoder().decode(SavedGame.self, from: data)
+        self.savedGame = try SavedGame.parse(from: data)
     }
 
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        let data = try JSONEncoder().encode(savedGame)
+    nonisolated func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let data = try savedGame.toData()
         return .init(regularFileWithContents: data)
     }
 }

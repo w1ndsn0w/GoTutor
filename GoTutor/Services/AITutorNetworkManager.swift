@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TeachingInput {
+struct TeachingInput: Sendable {
     let turn: Int
     let toPlay: String
     let playedMove: String
@@ -20,7 +20,7 @@ struct TeachingInput {
     let keyPV: [String]
 }
 
-class AITutorNetworkManager {
+class AITutorNetworkManager: Sendable {
     static let shared = AITutorNetworkManager()
     
     // 🚨 请在这里填入你刚刚在 DeepSeek 官网申请的 API Key

@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import UIKit
 import UniformTypeIdentifiers
-
+@MainActor
 final class GoGame: ObservableObject {
     let size: Int
     // 🌍 全局唯一的身份证，防止多开窗口时数据串台
@@ -76,21 +76,22 @@ final class GoGame: ObservableObject {
     private var analysisTimer: DispatchWorkItem?
     private var expectedBatchResponses = 0
     private var receivedBatchResponses = 0
-    
+    private var notificationTask: Task<Void, Never>?
     init(size: Int = 19) {
         self.size = size
         self.board = Array(repeating: Array(repeating: .empty, count: size), count: size)
         self.positionHistory.insert(Self.hashBoard(self.board))
-        
-        // 监听来自 C++ 引擎的全局广播
-        NotificationCenter.default.addObserver(forName: NSNotification.Name("KataGoJSONBroadcast"), object: nil, queue: .main) { [weak self] notification in
-            guard let self = self, let jsonString = notification.userInfo?["json"] as? String else { return }
-            self.handleKataGoJSON(jsonString)
+        notificationTask = Task {
+            for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("KataGoJSONBroadcast")) {
+                if let jsonString = notification.userInfo?["json"] as? String {
+                    self.handleKataGoJSON(jsonString)
+                }
+            }
         }
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self)
+        notificationTask?.cancel()
     }
     
     // MARK: - 引擎管理
@@ -242,9 +243,9 @@ final class GoGame: ObservableObject {
                     do {
                         let stream = AITutorNetworkManager.shared.fetchExplanationStream(prompt: prompt)
                         for try await chunk in stream {
-                            DispatchQueue.main.async { self.tutorExplanation += chunk }
+                            self.tutorExplanation += chunk
                         }
-                        DispatchQueue.main.async { self.isTutorThinking = false }
+                        self.isTutorThinking = false
                     } catch {
                         DispatchQueue.main.async {
                             self.tutorExplanation = "网络请求失败，请检查 API Key..."
@@ -405,15 +406,19 @@ final class GoGame: ObservableObject {
         let letters = ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"]
         return "\(letters[c])\(size - r)"
     }
-    
+    private var analysisTask: Task<Void, Never>?
+
     private func scheduleAnalysis() {
-        analysisTimer?.cancel()
+        analysisTask?.cancel()
         if isAIBattleMode && currentPlayer == aiPlayerColor {
             requestSingleAnalysis()
         } else {
-            let workItem = DispatchWorkItem { [weak self] in self?.requestSingleAnalysis() }
-            analysisTimer = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: workItem)
+            analysisTask = Task {
+                // 等待 3 秒 (Swift 6 可以直接用 .seconds(3))
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                self.requestSingleAnalysis() // 安全调用，继承了 @MainActor
+            }
         }
     }
     

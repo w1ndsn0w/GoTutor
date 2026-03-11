@@ -55,7 +55,7 @@ enum IllegalReason: String, Codable, Equatable {
     case ko = "打劫（重复盘面）"
 }
 
-struct GameSnapshot: Codable, Equatable {
+struct GameSnapshot: Codable, Equatable, Sendable {
     var board: [[Stone]]
     var currentPlayer: Stone
     var capturesBlack: Int
@@ -68,7 +68,7 @@ struct GameSnapshot: Codable, Equatable {
     var moves: [Move]
 }
 
-struct TerritoryAnalysis: Equatable {
+struct TerritoryAnalysis: Equatable, Sendable {
     let blackTerritory: Set<Point>
     let whiteTerritory: Set<Point>
     let neutral: Set<Point>
@@ -78,7 +78,7 @@ struct TerritoryAnalysis: Equatable {
 
 // MARK: - Save & Analysis Types
 
-struct MoveAnalysis: Codable, Equatable {
+struct MoveAnalysis: Codable, Equatable, Sendable {
     let winrate: Double
     let scoreLead: Double
     let ownership: [Double]?
@@ -86,26 +86,49 @@ struct MoveAnalysis: Codable, Equatable {
     var candidateMoves: [CandidateMove] = []
 }
 
-struct SavedGame: Codable {
+struct SavedGame: Sendable {
     let size: Int
     let date: Date
     let moves: [Move]
     let analyses: [Int: MoveAnalysis]
 }
 
-struct KataGoResponse: Codable {
+// 手动实现 Codable 并显式标记为 nonisolated，打破编译器的隔离推断
+extension SavedGame: Codable {
+    enum CodingKeys: String, CodingKey {
+        case size, date, moves, analyses
+    }
+    
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.size = try container.decode(Int.self, forKey: .size)
+        self.date = try container.decode(Date.self, forKey: .date)
+        self.moves = try container.decode([Move].self, forKey: .moves)
+        self.analyses = try container.decode([Int: MoveAnalysis].self, forKey: .analyses)
+    }
+    
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.size, forKey: .size)
+        try container.encode(self.date, forKey: .date)
+        try container.encode(self.moves, forKey: .moves)
+        try container.encode(self.analyses, forKey: .analyses)
+    }
+}
+
+struct KataGoResponse: Codable, Sendable {
     let id: String?
     let turnNumber: Int?
     let ownership: [Double]?
     let rootInfo: RootInfo?
     let moveInfos: [MoveInfo]?
     
-    struct RootInfo: Codable {
+    struct RootInfo: Codable, Sendable {
         let winrate: Double?
         let scoreLead: Double?
     }
     
-    struct MoveInfo: Codable {
+    struct MoveInfo: Codable, Sendable {
         let move: String
         let winrate: Double?
         let scoreLead: Double?
@@ -119,3 +142,15 @@ struct KataGoResponse: Codable {
         let pv: [String]
         let order: Int
     }
+// MARK: - Swift 6 并发安全的编解码助手
+extension SavedGame {
+    // 明确告诉编译器，解码动作不需要主线程
+    nonisolated static func parse(from data: Data) throws -> SavedGame {
+        return try JSONDecoder().decode(SavedGame.self, from: data)
+    }
+    
+    // 明确告诉编译器，编码动作不需要主线程
+    nonisolated func toData() throws -> Data {
+        return try JSONEncoder().encode(self)
+    }
+}
