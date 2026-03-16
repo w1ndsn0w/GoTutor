@@ -36,3 +36,5 @@ project.xcworkspace/
 
 GoTutor/Resources/model.bin.gz
 GoTutor/KataGoCore/libkatago.a
+# 忽略本地机密配置文件
+*.xcconfig

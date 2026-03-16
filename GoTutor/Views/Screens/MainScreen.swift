@@ -177,9 +177,23 @@ struct GameScreen: View {
 
                 Group {
                     Toggle("AI陪练", isOn: $game.isAIBattleMode)
+                    
+                    // 当开启 AI 陪练时，显示执黑执白选项
+                    if game.isAIBattleMode {
+                        Picker("", selection: $game.aiPlayerColor) {
+                            Text("AI 执白").tag(Stone.white)
+                            Text("AI 执黑").tag(Stone.black)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 130)
+                        // 增加一点过渡动画，让 UI 展开时更平滑
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                    
                     Toggle("导师", isOn: $game.isTutorMode)
                 }
                 .toggleStyle(CleanWhiteToggleStyle())
+                .animation(.easeInOut(duration: 0.2), value: game.isAIBattleMode) // 绑定动画
                 
                 Divider().frame(height: 16)
 
