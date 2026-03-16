@@ -22,8 +22,13 @@ final class GoGame: ObservableObject {
     @Published var isAIBattleMode: Bool = false {
         didSet { if isAIBattleMode && currentPlayer == aiPlayerColor { scheduleAnalysis() } }
     }
-    @Published var aiPlayerColor: Stone = .white
-    
+    @Published var aiPlayerColor: Stone = .white {
+        didSet {
+            if isAIBattleMode && currentPlayer == aiPlayerColor {
+                scheduleAnalysis()
+            }
+        }
+    }
     // MARK: - 导师模式核心状态
     @Published var isTutorMode: Bool = false {
         didSet {

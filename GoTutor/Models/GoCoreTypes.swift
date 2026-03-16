@@ -142,7 +142,7 @@ struct KataGoResponse: Codable, Sendable {
         let pv: [String]
         let order: Int
     }
-// MARK: - Swift 6 并发安全的编解码助手
+
 extension SavedGame {
     // 明确告诉编译器，解码动作不需要主线程
     nonisolated static func parse(from data: Data) throws -> SavedGame {
@@ -152,5 +152,33 @@ extension SavedGame {
     // 明确告诉编译器，编码动作不需要主线程
     nonisolated func toData() throws -> Data {
         return try JSONEncoder().encode(self)
+    }
+}
+// MARK: - SGF 坐标转换
+
+extension Point {
+    // 1. 从 SGF 坐标串初始化 (例如 "pd" -> r: 3, c: 15)
+    init?(sgf: String) {
+        guard sgf.count == 2 else { return nil }
+        let chars = Array(sgf.lowercased())
+        let cChar = chars[0].asciiValue ?? 0
+        let rChar = chars[1].asciiValue ?? 0
+        
+        // 'a' 的 ASCII 值是 97
+        let aValue = Character("a").asciiValue ?? 97
+        
+        self.c = Int(cChar - aValue)
+        self.r = Int(rChar - aValue)
+        
+        // 简单越界保护 (允许 pass 等特殊情况，但只解析盘内坐标)
+        guard c >= 0 && c < 19 && r >= 0 && r < 19 else { return nil }
+    }
+    
+    // 2. 导出为 SGF 格式坐标 (方便以后保存用户的修改)
+    func toSGF() -> String {
+        let aValue = Int(Character("a").asciiValue ?? 97)
+        let cStr = String(UnicodeScalar(aValue + self.c)!)
+        let rStr = String(UnicodeScalar(aValue + self.r)!)
+        return "\(cStr)\(rStr)"
     }
 }

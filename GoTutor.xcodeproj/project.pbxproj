@@ -15,9 +15,22 @@
 		20E595BF2F5AAE6200690FCB /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2002781B2F67F03F0023B808 /* Exceptions for "GoTutor" folder in "GoTutor" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 20D12D392F5807D90045B426 /* GoTutor */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		20D12D3C2F5807D90045B426 /* GoTutor */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2002781B2F67F03F0023B808 /* Exceptions for "GoTutor" folder in "GoTutor" target */,
+			);
 			path = GoTutor;
 			sourceTree = "<group>";
 		};
@@ -256,6 +269,8 @@
 		};
 		20D12D462F5807DB0045B426 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 20D12D3C2F5807D90045B426 /* GoTutor */;
+			baseConfigurationReferenceRelativePath = Secrets.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -265,6 +280,7 @@
 				DEVELOPMENT_TEAM = E9B5CB8M7L;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GoTutor/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -299,6 +315,8 @@
 		};
 		20D12D472F5807DB0045B426 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 20D12D3C2F5807D90045B426 /* GoTutor */;
+			baseConfigurationReferenceRelativePath = Secrets.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -308,6 +326,7 @@
 				DEVELOPMENT_TEAM = E9B5CB8M7L;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GoTutor/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

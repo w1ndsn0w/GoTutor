@@ -24,8 +24,14 @@ class AITutorNetworkManager: Sendable {
     static let shared = AITutorNetworkManager()
     
     // 🚨 请在这里填入你刚刚在 DeepSeek 官网申请的 API Key
-    private let apiKey = "sk-f0b78ca6da4746b2972f3a9ab1b0f74f"
-    
+    private var apiKey: String {
+        guard let key = Bundle.main.infoDictionary?["DeepSeekAPIKey"] as? String, !key.isEmpty else {
+            print("❌ 严重错误: 找不到 DeepSeek API Key！请检查 Secrets.xcconfig 和 Info.plist 配置。")
+            return ""
+        }
+        print("当前读取到的 api key 是[\(key)]")
+        return key
+    }
     private let endpoint = "https://api.deepseek.com/chat/completions"
 
     func fetchExplanationStream(prompt: String) -> AsyncThrowingStream<String, Error> {
