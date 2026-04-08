@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GoBoardWithCoordinatesView: View {
-    @ObservedObject var game: GoGame
+    @ObservedObject var game: GoGameViewModel
     @Binding var hoverPoint: Point?
 
     let showCoordinates: Bool

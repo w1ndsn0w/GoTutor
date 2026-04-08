@@ -3,7 +3,7 @@ import Combine
 import UIKit
 import UniformTypeIdentifiers
 @MainActor
-final class GoGame: ObservableObject {
+final class GoGameViewModel: ObservableObject {
     let size: Int
     // 🌍 全局唯一的身份证，防止多开窗口时数据串台
     let gameId = UUID().uuidString
