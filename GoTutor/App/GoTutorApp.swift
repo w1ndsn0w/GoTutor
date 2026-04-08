@@ -12,7 +12,7 @@ struct GoTutorApp: App {
     var body: some Scene {
         WindowGroup {
             //TsumegoListView()
-            MainScreen()
+            MainView()
         }
     }
 }

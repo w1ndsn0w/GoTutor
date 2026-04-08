@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GoBoardWithCoordinatesView: View {
-    @ObservedObject var game: GoGame
+    @ObservedObject var game: GoGameViewModel
     @Binding var hoverPoint: Point?
 
     let showCoordinates: Bool
@@ -191,7 +191,7 @@ struct GoBoardWithCoordinatesView: View {
             if (game.isReviewMode || game.isTutorMode), let analysis = game.moveAnalyses[game.currentTurn] {
                 ForEach(analysis.candidateMoves, id: \.order) { candidate in
                     // 动态将 "D4" 这种字符串翻译成屏幕坐标
-                    if let pt = Point(gtp: candidate.move),
+                    if let pt = Point(gtp: candidate.move, boardSize: game.size),
                        game.board[pt.r][pt.c] == .empty { // 确保该位置没有被棋子挡住
                         
                         ZStack {

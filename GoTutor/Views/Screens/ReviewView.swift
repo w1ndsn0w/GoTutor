@@ -1,11 +1,11 @@
 import SwiftUI
 
-struct ReviewScreen: View {
+struct ReviewView: View {
     @Environment(\.dismiss) var dismiss
     let fileURL: URL
     
     // 复盘页面拥有一个独立的“大脑”
-    @StateObject private var game = GoGame()
+    @StateObject private var game = GoGameViewModel()
 
     var body: some View {
         VStack(spacing: 0) {

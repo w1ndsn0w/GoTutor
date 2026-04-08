@@ -3,7 +3,7 @@ import Combine
 import UIKit
 import UniformTypeIdentifiers
 @MainActor
-final class GoGame: ObservableObject {
+final class GoGameViewModel: ObservableObject {
     let size: Int
     // 🌍 全局唯一的身份证，防止多开窗口时数据串台
     let gameId = UUID().uuidString
@@ -133,7 +133,7 @@ final class GoGame: ObservableObject {
                 if let moveInfos = response.moveInfos {
                     // 1. 提取第一名作为 bestMove
                     if let bestMoveStr = moveInfos.first?.move {
-                        bestMovePt = self.fromGTPCoordinate(bestMoveStr)
+                        bestMovePt = Point(gtp: bestMoveStr, boardSize: self.size)
                     }
                     
                     // 2. 提取前 3 名，组装成你极其强大的 CandidateMove
@@ -173,7 +173,7 @@ final class GoGame: ObservableObject {
             if self.isAIBattleMode && turn == self.currentTurn && self.currentPlayer == self.aiPlayerColor {
                 if let bestMove = response.moveInfos?.first?.move {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        if bestMove.lowercased() == "pass" { self.pass() } else if let pt = self.fromGTPCoordinate(bestMove) { self.place(atRow: pt.r, col: pt.c) }
+                        if bestMove.lowercased() == "pass" { self.pass() } else if let pt = Point(gtp: bestMove, boardSize: self.size) { self.place(atRow: pt.r, col: pt.c) }
                     }
                 }
             }
@@ -240,8 +240,8 @@ final class GoGame: ObservableObject {
                 isTutorThinking = true
                 
                 let colorStr = lastPlayer == .black ? "黑棋" : "白棋"
-                let actualStr = toGTPCoordinate(r: actual.r, c: actual.c)
-                let bestStr = toGTPCoordinate(r: best.r, c: best.c)
+                let actualStr = actual.toGTP(boardSize: size)
+                let bestStr = best.toGTP(boardSize: size)
                 let prompt = "当前第 \(targetTurn) 手，人类执\(colorStr)下在 \(actualStr)，导致胜率暴跌 \(wrPercent)（亏损 \(slPoints) 目）。KataGo 推荐的最佳选点是 \(bestStr)。请点评。"
                 
                 Task {
@@ -400,17 +400,6 @@ final class GoGame: ObservableObject {
         board = snap.board; currentPlayer = snap.currentPlayer; capturesBlack = snap.capturesBlack; capturesWhite = snap.capturesWhite; consecutivePasses = snap.consecutivePasses; isGameOver = snap.isGameOver; lastMove = snap.lastMove; lastIllegalReason = snap.lastIllegalReason; positionHistory = snap.positionHistory; moves = snap.moves
     }
     
-    private func fromGTPCoordinate(_ gtp: String) -> Point? {
-        let upper = gtp.uppercased(); guard upper.count >= 2 else { return nil }
-        let letters = ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"]
-        guard let c = letters.firstIndex(of: String(upper.prefix(1))), let number = Int(upper.dropFirst()) else { return nil }
-        return Point(r: size - number, c: c)
-    }
-    
-    private func toGTPCoordinate(r: Int, c: Int) -> String {
-        let letters = ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"]
-        return "\(letters[c])\(size - r)"
-    }
     private var analysisTask: Task<Void, Never>?
 
     private func scheduleAnalysis() {
@@ -433,7 +422,7 @@ final class GoGame: ObservableObject {
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
             switch move.kind {
-            case .place(let p): gtpMoves.append([playerStr, toGTPCoordinate(r: p.r, c: p.c)])
+            case .place(let p): gtpMoves.append([playerStr, p.toGTP(boardSize: size)])
             case .pass: gtpMoves.append([playerStr, "pass"])
             }
         }
@@ -461,7 +450,7 @@ final class GoGame: ObservableObject {
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
             switch move.kind {
-            case .place(let p): gtpMoves.append([playerStr, toGTPCoordinate(r: p.r, c: p.c)])
+            case .place(let p): gtpMoves.append([playerStr, p.toGTP(boardSize: size)])
             case .pass: gtpMoves.append([playerStr, "pass"])
             }
         }

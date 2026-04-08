@@ -12,23 +12,26 @@ struct Point: Hashable, Codable {
     let r: Int // 行 (0 到 18)
     let c: Int // 列 (0 到 18)
     
+    private static let gtpLetters = Array("ABCDEFGHJKLMNOPQRST")
+
     // GTP 协议的双向翻译助手
-    func toGTP() -> String {
-        let letters = Array("ABCDEFGHJKLMNOPQRST")
-        guard c >= 0 && c < 19 && r >= 0 && r < 19 else { return "pass" }
-        return "\(String(letters[c]))\(19 - r)"
+    func toGTP(boardSize: Int = 19) -> String {
+        guard c >= 0 && c < boardSize && c < Self.gtpLetters.count && r >= 0 && r < boardSize else { return "pass" }
+        return "\(String(Self.gtpLetters[c]))\(boardSize - r)"
     }
     
-    init?(gtp: String) {
+    init?(gtp: String, boardSize: Int = 19) {
         let upperStr = gtp.uppercased()
         guard upperStr.count >= 2, upperStr != "PASS" else { return nil }
         let letter = upperStr.first!
         let numberStr = upperStr.dropFirst()
-        let letters = Array("ABCDEFGHJKLMNOPQRST")
-        guard let cIndex = letters.firstIndex(of: letter),
-              let number = Int(numberStr) else { return nil }
+        guard let cIndex = Self.gtpLetters.firstIndex(of: letter),
+              let number = Int(numberStr),
+              cIndex < boardSize,
+              number >= 1,
+              number <= boardSize else { return nil }
         self.c = cIndex
-        self.r = 19 - number
+        self.r = boardSize - number
     }
     
     init(r: Int, c: Int) {
@@ -135,13 +138,14 @@ struct KataGoResponse: Codable, Sendable {
         let pv: [String]?
     }
 }
-    struct CandidateMove: Codable, Equatable, Sendable {
-        let move: String
-        let winrate: Double
-        let scoreLead: Double
-        let pv: [String]
-        let order: Int
-    }
+
+struct CandidateMove: Codable, Equatable, Sendable {
+    let move: String
+    let winrate: Double
+    let scoreLead: Double
+    let pv: [String]
+    let order: Int
+}
 
 extension SavedGame {
     // 明确告诉编译器，解码动作不需要主线程
