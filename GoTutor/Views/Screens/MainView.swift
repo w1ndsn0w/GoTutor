@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 // MARK: - Root ContentView (管理全局状态)
-struct MainScreen: View {
+struct MainView: View {
     @State private var boardSizeOption: Int = 19
     @State private var pendingBoardSize: Int? = nil
     @State private var showSizeChangeAlert: Bool = false
@@ -53,7 +53,7 @@ struct GameScreen: View {
     let showCoordinates: Bool; let showStarPoints: Bool; let showHoverGhost: Bool; let showLastMoveMark: Bool; let useWoodBackground: Bool
     let onOpenSettings: () -> Void; let onUpdateBoardEmptyState: (Bool) -> Void; let onRequestChangeSize: (Int) -> Void
 
-    @StateObject private var game: GoGame
+    @StateObject private var game: GoGameViewModel
     @State private var hoverPoint: Point? = nil
     @State private var showGameOverAlert = false
     @State private var reviewFileURL: URL? = nil
@@ -68,7 +68,7 @@ struct GameScreen: View {
         self.size = size; self.boardPixelSize = boardPixelSize
         self.showCoordinates = showCoordinates; self.showStarPoints = showStarPoints; self.showHoverGhost = showHoverGhost; self.showLastMoveMark = showLastMoveMark; self.useWoodBackground = useWoodBackground
         self.onOpenSettings = onOpenSettings; self.onUpdateBoardEmptyState = onUpdateBoardEmptyState; self.onRequestChangeSize = onRequestChangeSize
-        _game = StateObject(wrappedValue: GoGame(size: size))
+        _game = StateObject(wrappedValue: GoGameViewModel(size: size))
     }
 
     var body: some View {
@@ -141,7 +141,7 @@ struct GameScreen: View {
         // 2. 挂载复盘页 (全屏覆盖)
         .fullScreenCover(isPresented: $showReviewSheet) {
             if let url = reviewFileURL {
-                ReviewScreen(fileURL: url)
+                ReviewView(fileURL: url)
                     .onDisappear {
                         url.stopAccessingSecurityScopedResource()
                     }
@@ -224,7 +224,7 @@ struct GameScreen: View {
 
 // MARK: - 右侧信息面板内容
 struct SidePanelContent: View {
-    @ObservedObject var game: GoGame
+    @ObservedObject var game: GoGameViewModel
     
     var body: some View {
         VStack(spacing: 20) {
