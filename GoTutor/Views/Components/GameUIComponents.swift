@@ -84,6 +84,8 @@ struct HeaderButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .medium))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(Color(UIColor.secondarySystemGroupedBackground).opacity(isEnabled ? 1.0 : 0.6))
@@ -100,6 +102,8 @@ struct CleanWhiteToggleStyle: ToggleStyle {
         Button(action: { configuration.isOn.toggle() }) {
             configuration.label
                 .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(Color(UIColor.secondarySystemGroupedBackground).opacity(configuration.isOn ? 1.0 : 0.6))

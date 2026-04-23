@@ -20,7 +20,7 @@ struct GoBoardWithCoordinatesView: View {
             let boardDimension = max( 0, minDimension - padding * 2)
             let cellSize = game.size > 0 ? (boardDimension / CGFloat(game.size)) : 0
                         let margin = cellSize / 2
-                        let isAITurn = game.isAIBattleMode && game.currentPlayer == game.aiPlayerColor
+                        let isAITurn = game.isAITurn
 
             ZStack {
                 boardBackground
@@ -188,7 +188,8 @@ struct GoBoardWithCoordinatesView: View {
     // ✅ 绘制数字 1、2、3 候选点
     private func drawCandidateMoves(cellSize: CGFloat, margin: CGFloat) -> some View {
         Group {
-            if (game.isReviewMode || game.isTutorMode), let analysis = game.moveAnalyses[game.currentTurn] {
+            let isHumanAITurn = game.isAIBattleMode && game.currentPlayer != game.aiPlayerColor
+            if (game.isReviewMode || game.isTutorMode || isHumanAITurn), let analysis = game.moveAnalyses[game.currentTurn] {
                 ForEach(analysis.candidateMoves, id: \.order) { candidate in
                     // 动态将 "D4" 这种字符串翻译成屏幕坐标
                     if let pt = Point(gtp: candidate.move, boardSize: game.size),

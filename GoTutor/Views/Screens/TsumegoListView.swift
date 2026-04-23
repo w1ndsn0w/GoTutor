@@ -8,8 +8,11 @@
 import SwiftUI
 
 struct TsumegoListView: View {
+    @Environment(\.dismiss) private var dismiss
+
     // 读取我们刚才写的模拟题库
     let problems = TsumegoBank.beginnerProblems
+    var showsCloseButton = false
     
     var body: some View {
         NavigationView {
@@ -43,6 +46,12 @@ struct TsumegoListView: View {
             .navigationTitle("死活题训练")
             // 顶部加一个“顺序刷题”的快捷按钮
             .toolbar {
+                if showsCloseButton {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("关闭") { dismiss() }
+                    }
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if let first = problems.first {
                         NavigationLink(destination: TsumegoSolvingView(problem: first)) {

@@ -42,8 +42,8 @@ struct MainView: View {
             Button("切换并重开", role: .destructive) { if let s = pendingBoardSize { boardSizeOption = s }; pendingBoardSize = nil }
         } message: { Text("当前棋局将被清空，是否继续？") }
         .sheet(isPresented: $showSettings) {
-                    SettingsView()
-                }
+            SettingsView()
+        }
     }
 }
 
@@ -61,7 +61,10 @@ struct GameScreen: View {
     @State private var showFileImporter = false
     @State private var showReviewSheet = false
     @State private var showFileExporter = false
+    @State private var showTsumegoSheet = false
     @State private var documentToSave: GoGameDocument?
+    @State private var fileAlertMessage = ""
+    @State private var showFileAlert = false
 
     
     init(size: Int, boardPixelSize: CGFloat, showCoordinates: Bool, showStarPoints: Bool, showHoverGhost: Bool, showLastMoveMark: Bool, useWoodBackground: Bool, onOpenSettings: @escaping () -> Void, onUpdateBoardEmptyState: @escaping (Bool) -> Void, onRequestChangeSize: @escaping (Int) -> Void) {
@@ -117,11 +120,16 @@ struct GameScreen: View {
             switch result {
             case .success(let url):
                 // 获取到文件路径后，通过环境变量触发全屏复盘页
-                let _ = url.startAccessingSecurityScopedResource()
+                guard url.startAccessingSecurityScopedResource() else {
+                    fileAlertMessage = "无法访问所选文件，请重新选择或检查文件权限。"
+                    showFileAlert = true
+                    return
+                }
                 self.reviewFileURL = url
                 self.showReviewSheet = true
             case .failure(let error):
-                print("读取失败: \(error)")
+                fileAlertMessage = "读取失败：\(error.localizedDescription)"
+                showFileAlert = true
             }
         }
         // 系统原生保存面板
@@ -133,9 +141,11 @@ struct GameScreen: View {
          ) { result in
              switch result {
              case .success(let url):
-                 print("✅ 棋谱已成功保存至: \(url)")
+                 fileAlertMessage = "棋谱已保存至：\(url.lastPathComponent)"
+                 showFileAlert = true
              case .failure(let error):
-                 print("❌ 保存失败: \(error)")
+                 fileAlertMessage = "保存失败：\(error.localizedDescription)"
+                 showFileAlert = true
              }
          }
         // 2. 挂载复盘页 (全屏覆盖)
@@ -147,77 +157,120 @@ struct GameScreen: View {
                     }
             }
         }
+        .sheet(isPresented: $showTsumegoSheet) {
+            TsumegoListView(showsCloseButton: true)
+        }
+        .alert("文件操作", isPresented: $showFileAlert) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(fileAlertMessage)
+        }
     }
     
     private var headerBar: some View {
-        HStack(spacing: 16) {
-            Text("围棋").font(.system(size: 22, weight: .semibold))
-            
-            Picker("", selection: Binding(get: { size }, set: { onRequestChangeSize($0) })) {
-                Text("9路").tag(9); Text("13路").tag(13); Text("19路").tag(19)
-            }.pickerStyle(.segmented).frame(width: 150)
-            
-            statusPill
-            
+        HStack(spacing: 14) {
+            gameInfoGroup
+
             Spacer()
-            
+
             HStack(spacing: 12) {
-                Group {
-                    Button(action: { showFileImporter = true }) { Label("读谱", systemImage: "folder") }
-                    Button(action: {
-                        // 1. 生成数据装进快递盒
-                        documentToSave = GoGameDocument(savedGame: game.generateSaveData())
-                        // 2. 唤醒系统的保存面板
-                        showFileExporter = true
-                    }) { Label("保存", systemImage: "square.and.arrow.down") }
-                }
-                .buttonStyle(HeaderButtonStyle())
+                fileTrainingGroup
 
                 Divider().frame(height: 16)
 
-                Group {
-                    Toggle("AI陪练", isOn: $game.isAIBattleMode)
-                    
-                    // 当开启 AI 陪练时，显示执黑执白选项
-                    if game.isAIBattleMode {
-                        Picker("", selection: $game.aiPlayerColor) {
-                            Text("AI 执白").tag(Stone.white)
-                            Text("AI 执黑").tag(Stone.black)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 130)
-                        // 增加一点过渡动画，让 UI 展开时更平滑
-                        .transition(.scale.combined(with: .opacity))
-                    }
-                    
-                    Toggle("导师", isOn: $game.isTutorMode)
-                }
-                .toggleStyle(CleanWhiteToggleStyle())
-                .animation(.easeInOut(duration: 0.2), value: game.isAIBattleMode) // 绑定动画
-                
-                Divider().frame(height: 16)
-
-                Group {
-                    Toggle("形势", isOn: $game.showRealTimeTerritory)
-                    Toggle("结算", isOn: $game.isEndGameScoring)
-                }
-                .toggleStyle(CleanWhiteToggleStyle())
+                battleModeGroup
 
                 Divider().frame(height: 16)
+
+                assistMenu
 
                 Button(action: { onOpenSettings() }) { Image(systemName: "gearshape") }
                 .buttonStyle(HeaderButtonStyle())
             }
+            .frame(minWidth: 0, alignment: .trailing)
         }
+    }
+
+    private var gameInfoGroup: some View {
+        HStack(spacing: 12) {
+            Text("围棋")
+                .font(.system(size: 22, weight: .semibold))
+                .lineLimit(1)
+
+            Picker("", selection: Binding(get: { size }, set: { onRequestChangeSize($0) })) {
+                Text("9路").tag(9); Text("13路").tag(13); Text("19路").tag(19)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 150)
+
+            statusPill
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var fileTrainingGroup: some View {
+        HStack(spacing: 8) {
+            Button(action: { showFileImporter = true }) { Label("读谱", systemImage: "folder") }
+            Button(action: {
+                // 1. 生成数据装进快递盒
+                documentToSave = GoGameDocument(savedGame: game.generateSaveData())
+                // 2. 唤醒系统的保存面板
+                showFileExporter = true
+            }) { Label("保存", systemImage: "square.and.arrow.down") }
+            Button(action: { showTsumegoSheet = true }) { Label("死活题", systemImage: "scope") }
+        }
+        .buttonStyle(HeaderButtonStyle())
+    }
+
+    private var battleModeGroup: some View {
+        HStack(spacing: 8) {
+            Toggle("AI陪练", isOn: $game.isAIBattleMode)
+
+            if game.isAIBattleMode {
+                Picker("", selection: $game.aiPlayerColor) {
+                    Text("执白").tag(Stone.white)
+                    Text("执黑").tag(Stone.black)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 104)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .toggleStyle(CleanWhiteToggleStyle())
+        .animation(.easeInOut(duration: 0.2), value: game.isAIBattleMode)
+    }
+
+    private var assistMenu: some View {
+        Menu {
+            Toggle("导师点评", isOn: $game.isTutorMode)
+            Toggle("实时形势", isOn: $game.showRealTimeTerritory)
+            Toggle("终局结算", isOn: $game.isEndGameScoring)
+        } label: {
+            Label("辅助", systemImage: "slider.horizontal.3")
+        }
+        .buttonStyle(HeaderButtonStyle())
     }
 
     private var statusPill: some View {
         HStack(spacing: 6) {
-            Circle().fill(game.currentPlayer == .black ? Color.black : Color.white).overlay(Circle().stroke(Color.secondary, lineWidth: 1)).frame(width: 12, height: 12)
-            Text(game.isGameOver ? "对局结束" : (game.currentPlayer == .black ? "黑方落子" : "白方落子"))
+            if game.isAIThinking || game.isHintThinking {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 12, height: 12)
+            } else {
+                Circle().fill(game.currentPlayer == .black ? Color.black : Color.white).overlay(Circle().stroke(Color.secondary, lineWidth: 1)).frame(width: 12, height: 12)
+            }
+            Text(statusText)
                 .font(.system(size: 13, weight: .medium)).foregroundStyle(.primary)
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(.quaternary, in: Capsule())
+    }
+
+    private var statusText: String {
+        if game.isGameOver { return "对局结束" }
+        if game.isAIThinking { return "AI 思考中" }
+        if game.isHintThinking { return "候选点计算中" }
+        return game.currentPlayer == .black ? "黑方落子" : "白方落子"
     }
 }

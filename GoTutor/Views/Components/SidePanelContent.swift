@@ -5,6 +5,8 @@ struct SidePanelContent: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            engineStatusSection
+
             prisonerSection
 
             Divider()
@@ -44,6 +46,42 @@ struct SidePanelContent: View {
         }
         .padding()
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var engineStatusSection: some View {
+        if (!game.isEngineReady && game.engineStatusMessage != nil) || game.isAIThinking || game.isHintThinking || game.analysisProgress < 1.0 {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if game.isAIThinking || game.isHintThinking || game.analysisProgress < 1.0 {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+
+                    Text(engineStatusTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+
+                if let message = game.engineStatusMessage, !game.isEngineReady {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var engineStatusTitle: String {
+        if game.analysisProgress < 1.0 { return "复盘批量分析中" }
+        if game.isAIThinking { return "AI 正在思考下一手" }
+        if game.isHintThinking { return "正在计算候选落点" }
+        return "KataGo 引擎未就绪"
     }
 
     private var tutorSection: some View {
@@ -106,7 +144,7 @@ struct SidePanelContent: View {
                     .disabled(game.moves.isEmpty)
 
                 Button(action: { game.pass() }) { Label("Pass", systemImage: "hand.raised") }
-                    .disabled(game.isGameOver)
+                    .disabled(game.isGameOver || game.isAITurn)
             }
 
             Button(action: { game.reset() }) { Label("重新开始", systemImage: "arrow.counterclockwise") }

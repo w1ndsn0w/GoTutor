@@ -20,11 +20,17 @@ final class GoGameViewModel: ObservableObject {
     @Published private(set) var lastIllegalReason: IllegalReason? = nil
     
     @Published var isAIBattleMode: Bool = false {
-        didSet { if isAIBattleMode && currentPlayer == aiPlayerColor { scheduleAnalysis() } }
+        didSet {
+            cancelPendingAIMove()
+            cancelScheduledAnalysis(clearInFlightState: true)
+            if isAIBattleMode { scheduleAnalysis() }
+        }
     }
     @Published var aiPlayerColor: Stone = .white {
         didSet {
-            if isAIBattleMode && currentPlayer == aiPlayerColor {
+            if isAIBattleMode {
+                cancelPendingAIMove()
+                cancelScheduledAnalysis(clearInFlightState: true)
                 scheduleAnalysis()
             }
         }
@@ -70,6 +76,10 @@ final class GoGameViewModel: ObservableObject {
     @Published var currentTurn: Int = 0
     @Published var isReviewMode: Bool = false
     @Published var analysisProgress: Double = 1.0
+    @Published private(set) var isEngineReady: Bool = false
+    @Published private(set) var engineStatusMessage: String? = nil
+    @Published private(set) var isAIThinking: Bool = false
+    @Published private(set) var isHintThinking: Bool = false
     
     private var snapshots: [GameSnapshot] = []
     private var positionHistory: Set<String> = []
@@ -82,6 +92,25 @@ final class GoGameViewModel: ObservableObject {
     private var expectedBatchResponses = 0
     private var receivedBatchResponses = 0
     private var notificationTask: Task<Void, Never>?
+    private var aiMoveTask: Task<Void, Never>?
+    private var pendingAIAnalysisTurn: Int? = nil
+    private var pendingHintAnalysisTurn: Int? = nil
+
+    var isAITurn: Bool {
+        isAIBattleMode && currentPlayer == aiPlayerColor && !isGameOver && !isReviewMode
+    }
+
+    private var aiBattleMaxVisits: Int {
+        switch size {
+        case 9:
+            return moves.count < 10 ? 120 : 90
+        case 13:
+            return moves.count < 14 ? 180 : 120
+        default:
+            return moves.count < 18 ? 320 : 180
+        }
+    }
+
     init(size: Int = 19) {
         self.size = size
         self.board = Array(repeating: Array(repeating: .empty, count: size), count: size)
@@ -101,12 +130,14 @@ final class GoGameViewModel: ObservableObject {
     
     // MARK: - 引擎管理
     func startEngine() {
+        guard !isEngineReady else { return }
         guard let modelPath = Bundle.main.path(forResource: "model", ofType: "bin.gz"),
               let configPath = Bundle.main.path(forResource: "analysis", ofType: "cfg") else {
-            print("❌ 找不到模型文件或 analysis.cfg 配置！")
+            engineStatusMessage = "找不到模型文件或 analysis.cfg 配置"
             return
         }
-        let _ = aiEngine.setEngineWithModel(modelPath, config: configPath)
+        engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath)
+        isEngineReady = true
     }
     
     // 🚨 修正：将 handleKataGoJSON 独立出来，不再嵌套在别的方法内部
@@ -119,6 +150,22 @@ final class GoGameViewModel: ObservableObject {
             guard let responseId = response.id, responseId.hasPrefix(self.gameId) else { return }
             
             let turn = response.turnNumber ?? 0
+
+            let shouldScheduleAIMove = self.isAIBattleMode
+                && turn == self.currentTurn
+                && self.currentPlayer == self.aiPlayerColor
+                && response.moveInfos?.first?.move != nil
+
+            if responseId.contains("_query_"), self.pendingAIAnalysisTurn == turn {
+                self.pendingAIAnalysisTurn = nil
+                if !shouldScheduleAIMove {
+                    self.isAIThinking = false
+                }
+            }
+            if responseId.contains("_human_hint_"), self.pendingHintAnalysisTurn == turn {
+                self.pendingHintAnalysisTurn = nil
+                self.isHintThinking = false
+            }
             
             if responseId.hasSuffix("batch_review") {
                 self.receivedBatchResponses += 1
@@ -170,12 +217,9 @@ final class GoGameViewModel: ObservableObject {
                 }
             }
             
-            if self.isAIBattleMode && turn == self.currentTurn && self.currentPlayer == self.aiPlayerColor {
-                if let bestMove = response.moveInfos?.first?.move {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        if bestMove.lowercased() == "pass" { self.pass() } else if let pt = Point(gtp: bestMove, boardSize: self.size) { self.place(atRow: pt.r, col: pt.c) }
-                    }
-                }
+            if shouldScheduleAIMove,
+               let bestMove = response.moveInfos?.first?.move {
+                self.scheduleAIMove(bestMove, forTurn: turn)
             }
         } catch { }
     }
@@ -282,6 +326,7 @@ final class GoGameViewModel: ObservableObject {
         lastIllegalReason = nil; guard !isGameOver else { return false }
         let p = Point(r: r, c: c); guard inBounds(p) else { lastIllegalReason = .outOfBounds; return false }
         guard board[r][c] == .empty else { lastIllegalReason = .occupied; return false }
+        cancelPendingAIMove()
         
         pushSnapshot()
         var newBoard = board; newBoard[r][c] = currentPlayer; var capturedPoints: [Point] = []
@@ -307,6 +352,7 @@ final class GoGameViewModel: ObservableObject {
     func pass() {
         if isReviewMode { return }
         lastIllegalReason = nil; guard !isGameOver else { return }
+        cancelPendingAIMove()
         pushSnapshot(); let mv = Move(player: currentPlayer, kind: .pass, captured: [])
         moves.append(mv); lastMove = mv; consecutivePasses += 1
         if consecutivePasses >= 2 { isGameOver = true }
@@ -320,12 +366,15 @@ final class GoGameViewModel: ObservableObject {
     
     func undo() {
         if isReviewMode { return }; guard let snap = snapshots.popLast() else { return }
+        cancelPendingAIMove()
         restore(from: snap); currentTurn = moves.count
         resetTutorUIForNewMove(isHuman: true)
         scheduleAnalysis()
     }
     
     func reset() {
+        cancelPendingAIMove()
+        cancelScheduledAnalysis(clearInFlightState: true)
         board = Array(repeating: Array(repeating: .empty, count: size), count: size)
         currentPlayer = .black; capturesBlack = 0; capturesWhite = 0; consecutivePasses = 0; isGameOver = false; moves = []; lastMove = nil; lastIllegalReason = nil
         snapshots = []; positionHistory = [Self.hashBoard(board)]
@@ -339,13 +388,14 @@ final class GoGameViewModel: ObservableObject {
     
     func toggleDeadStone(atRow r: Int, col c: Int) {
         guard isEndGameScoring else { return }
-        let p = Point(r: r, c: c); guard board[r][c] != .empty else { return }
+        let p = Point(r: r, c: c); guard inBounds(p), board[r][c] != .empty else { return }
         let group = collectGroup(board: board, start: p)
         if deadStones.contains(p) { deadStones.subtract(group) } else { deadStones.formUnion(group) }
         updateTerritory()
     }
     
     func loadGame(from url: URL) {
+        cancelPendingAIMove()
         self.currentFileURL = url
         do {
             let data = try Data(contentsOf: url); let savedGame = try JSONDecoder().decode(SavedGame.self, from: data)
@@ -362,6 +412,7 @@ final class GoGameViewModel: ObservableObject {
     }
     
     func setTurn(_ turn: Int) {
+        cancelPendingAIMove()
         let safeTurn = max(0, min(turn, moves.count)); currentTurn = safeTurn; rebuildBoard(upTo: safeTurn)
         if let analysis = moveAnalyses[safeTurn], let own = analysis.ownership { self.latestOwnership = own; self.updateTerritory() } else { self.latestOwnership = nil; currentAnalysis = nil }
         
@@ -410,22 +461,75 @@ final class GoGameViewModel: ObservableObject {
     
     private var analysisTask: Task<Void, Never>?
 
-    private func scheduleAnalysis() {
+    private func cancelScheduledAnalysis(clearInFlightState: Bool = false) {
         analysisTask?.cancel()
-        if isAIBattleMode && currentPlayer == aiPlayerColor {
-            requestSingleAnalysis()
-        } else {
-            analysisTask = Task {
-                // 等待 3 秒 (Swift 6 可以直接用 .seconds(3))
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled else { return }
-                self.requestSingleAnalysis() // 安全调用，继承了 @MainActor
+        analysisTask = nil
+        if clearInFlightState {
+            pendingAIAnalysisTurn = nil
+            pendingHintAnalysisTurn = nil
+            isAIThinking = false
+            isHintThinking = false
+        }
+    }
+
+    private func cancelPendingAIMove(clearThinking: Bool = true) {
+        let hadPendingMove = aiMoveTask != nil
+        aiMoveTask?.cancel()
+        aiMoveTask = nil
+        if clearThinking && hadPendingMove { isAIThinking = false }
+    }
+
+    private func scheduleAIMove(_ bestMove: String, forTurn turn: Int) {
+        cancelPendingAIMove(clearThinking: false)
+        isAIThinking = true
+        aiMoveTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            guard self.isAIBattleMode,
+                  self.currentTurn == turn,
+                  self.currentPlayer == self.aiPlayerColor,
+                  !self.isGameOver else {
+                self.isAIThinking = false
+                return
             }
+
+            if bestMove.lowercased() == "pass" {
+                self.pass()
+            } else if let point = Point(gtp: bestMove, boardSize: self.size) {
+                self.place(atRow: point.r, col: point.c)
+            } else {
+                self.isAIThinking = false
+            }
+        }
+    }
+
+    private func scheduleAnalysis() {
+        cancelScheduledAnalysis()
+        pendingHintAnalysisTurn = nil
+        isHintThinking = false
+        if isAIBattleMode {
+            if currentPlayer == aiPlayerColor {
+                requestSingleAnalysis(maxVisits: aiBattleMaxVisits)
+            } else {
+                analysisTask = Task {
+                    try? await Task.sleep(for: .milliseconds(700))
+                    guard !Task.isCancelled else { return }
+                    self.requestSingleAnalysis(maxVisits: 24, includeOwnership: false, idSuffix: "human_hint")
+                }
+            }
+            return
+        }
+
+        analysisTask = Task {
+            // 等待 3 秒 (Swift 6 可以直接用 .seconds(3))
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self.requestSingleAnalysis() // 安全调用，继承了 @MainActor
         }
     }
     
     // MARK: - 网络请求
-    private func requestSingleAnalysis() {
+    private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
         var gtpMoves: [[String]] = []
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
@@ -437,18 +541,25 @@ final class GoGameViewModel: ObservableObject {
         
         // 🚨 修正：此处保持 query 格式，并戴上身份证 gameId
         let queryDict: [String: Any] = [
-            "id": "\(gameId)_query_\(moves.count)",
+            "id": "\(gameId)_\(idSuffix)_\(moves.count)",
             "moves": gtpMoves,
             "rules": "chinese",
             "boardXSize": size,
             "boardYSize": size,
             "analyzeTurns": [gtpMoves.count],
-            "maxVisits": 50,
-            "includeOwnership": true
+            "maxVisits": maxVisits,
+            "includeOwnership": includeOwnership
         ]
         
         if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
            let jsonString = String(data: jsonData, encoding: .utf8) {
+            if idSuffix == "query", isAIBattleMode, currentPlayer == aiPlayerColor {
+                pendingAIAnalysisTurn = moves.count
+                isAIThinking = true
+            } else if idSuffix == "human_hint" {
+                pendingHintAnalysisTurn = moves.count
+                isHintThinking = true
+            }
             aiEngine.sendQuery(jsonString)
         }
     }
