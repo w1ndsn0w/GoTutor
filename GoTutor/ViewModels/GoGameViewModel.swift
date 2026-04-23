@@ -386,6 +386,14 @@ final class GoGameViewModel: ObservableObject {
     func generateSaveData() -> SavedGame {
         return SavedGame(size: size, date: Date(), moves: moves, analyses: moveAnalyses)
     }
+
+    func teachingFeedback(for turn: Int) -> TeachingFeedback? {
+        TeachingFeedbackAnalyzer.feedback(for: turn, moves: moves, analyses: moveAnalyses, boardSize: size)
+    }
+
+    func keyTeachingFeedbacks(limit: Int = 6) -> [TeachingFeedback] {
+        TeachingFeedbackAnalyzer.keyFeedbacks(moves: moves, analyses: moveAnalyses, boardSize: size, limit: limit)
+    }
     
     private func pushSnapshot() {
         snapshots.append(GameSnapshot(board: board, currentPlayer: currentPlayer, capturesBlack: capturesBlack, capturesWhite: capturesWhite, consecutivePasses: consecutivePasses, isGameOver: isGameOver, lastMove: lastMove, lastIllegalReason: lastIllegalReason, positionHistory: positionHistory, moves: moves))
