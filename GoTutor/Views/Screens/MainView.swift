@@ -105,7 +105,6 @@ struct GameScreen: View {
             }
         }
         .onAppear {
-            game.startEngine() // 视图加载时自动唤醒引擎
             onUpdateBoardEmptyState(game.moves.isEmpty)
         }
         .onChange(of: game.moves.count) { _, _ in onUpdateBoardEmptyState(game.moves.isEmpty) }
@@ -116,7 +115,7 @@ struct GameScreen: View {
         // 【适配 iPad】本地文件选择器
 
         // 1. 读取文件的逻辑
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json]) { result in
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .smartGameFormat]) { result in
             switch result {
             case .success(let url):
                 // 获取到文件路径后，通过环境变量触发全屏复盘页
@@ -136,8 +135,8 @@ struct GameScreen: View {
          .fileExporter(
              isPresented: $showFileExporter,
              document: documentToSave,
-             contentType: .json,
-             defaultFilename: "GoTutor_棋谱_\(Int(Date().timeIntervalSince1970))"
+             contentType: .smartGameFormat,
+             defaultFilename: "GoTutor_棋谱_\(Int(Date().timeIntervalSince1970)).sgf"
          ) { result in
              switch result {
              case .success(let url):
@@ -233,6 +232,21 @@ struct GameScreen: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 104)
+
+                Menu {
+                    Picker("AI难度", selection: $game.aiDifficulty) {
+                        ForEach(AIBattleDifficulty.allCases) { difficulty in
+                            Text(difficulty.title).tag(difficulty)
+                        }
+                    }
+                } label: {
+                    Label(game.aiDifficulty.title, systemImage: "dial.low")
+                }
+                .buttonStyle(HeaderButtonStyle())
+                .frame(minWidth: 118)
+
+                Toggle("提示", isOn: $game.isAICoachHintEnabled)
+                    .toggleStyle(CleanWhiteToggleStyle())
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }

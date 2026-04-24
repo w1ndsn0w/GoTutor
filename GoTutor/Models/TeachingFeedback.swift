@@ -95,7 +95,9 @@ struct TeachingFeedbackAnalyzer: Sendable {
     }
 
     static func keyFeedbacks(moves: [Move], analyses: [Int: MoveAnalysis], boardSize: Int, limit: Int = 6) -> [TeachingFeedback] {
-        (1...moves.count)
+        guard !moves.isEmpty else { return [] }
+
+        return (1...moves.count)
             .compactMap { feedback(for: $0, moves: moves, analyses: analyses, boardSize: boardSize) }
             .filter { $0.severity >= .inaccuracy }
             .sorted {

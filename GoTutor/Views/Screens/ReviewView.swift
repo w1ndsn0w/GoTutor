@@ -89,12 +89,7 @@ struct ReviewView: View {
             }
         }
         .onAppear {
-            // 界面出现时，立刻启动引擎并读取本地 JSON 棋谱
-            game.startEngine()
-            // 稍微延迟 1 秒，等待 C++ 引擎的 pipe 通道彻底建立后再发送大批量数据
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                game.loadGame(from: fileURL)
-            }
+            game.loadGame(from: fileURL)
         }
     }
 }

@@ -2,9 +2,60 @@ import Foundation
 import Combine
 import UIKit
 import UniformTypeIdentifiers
+
+enum AIBattleDifficulty: String, CaseIterable, Identifiable, Sendable {
+    case beginner20k
+    case kyu10
+    case amateur1d
+    case amateur3d
+    case amateur5d
+    case pro1p
+    case pro5p
+    case pro9p
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .beginner20k: return "启蒙 20级"
+        case .kyu10: return "级位 10级"
+        case .amateur1d: return "业余初段"
+        case .amateur3d: return "业余3段"
+        case .amateur5d: return "业余5段"
+        case .pro1p: return "职业初段"
+        case .pro5p: return "职业5段"
+        case .pro9p: return "职业9段"
+        }
+    }
+
+    func maxVisits(boardSize: Int, moveCount: Int) -> Int {
+        let base: Int
+        switch self {
+        case .beginner20k: base = 8
+        case .kyu10: base = 18
+        case .amateur1d: base = 45
+        case .amateur3d: base = 90
+        case .amateur5d: base = 150
+        case .pro1p: base = 260
+        case .pro5p: base = 420
+        case .pro9p: base = 700
+        }
+
+        let boardScale: Double
+        switch boardSize {
+        case 9: boardScale = 0.55
+        case 13: boardScale = 0.75
+        default: boardScale = 1.0
+        }
+
+        let openingScale = moveCount < max(10, boardSize) ? 1.25 : 1.0
+        return max(4, Int(Double(base) * boardScale * openingScale))
+    }
+}
+
 @MainActor
 final class GoGameViewModel: ObservableObject {
-    let size: Int
+    @Published private(set) var size: Int
     // 🌍 全局唯一的身份证，防止多开窗口时数据串台
     let gameId = UUID().uuidString
     
@@ -35,12 +86,29 @@ final class GoGameViewModel: ObservableObject {
             }
         }
     }
+    @Published var aiDifficulty: AIBattleDifficulty = .amateur1d {
+        didSet {
+            if isAIBattleMode {
+                cancelPendingAIMove()
+                cancelScheduledAnalysis(clearInFlightState: true)
+                scheduleAnalysis()
+            }
+        }
+    }
+    @Published var isAICoachHintEnabled: Bool = false {
+        didSet {
+            guard isAIBattleMode else { return }
+            cancelScheduledAnalysis(clearInFlightState: true)
+            scheduleAnalysis()
+        }
+    }
     // MARK: - 导师模式核心状态
     @Published var isTutorMode: Bool = false {
         didSet {
             if isTutorMode {
                 checkedTurnForTutor = -1
                 isAnalyzingTutor = true
+                if isAIBattleMode { scheduleAnalysis() }
                 executeBlunderCheck(forTurn: currentTurn)
             } else {
                 tutorCheckTimer?.cancel()
@@ -59,11 +127,19 @@ final class GoGameViewModel: ObservableObject {
     @Published var reviewBestMoveHint: Point? = nil
     
     @Published var showRealTimeTerritory: Bool = false {
-        didSet { if showRealTimeTerritory { isEndGameScoring = false }; updateTerritory() }
+        didSet {
+            if showRealTimeTerritory { isEndGameScoring = false }
+            if let ownership = moveAnalyses[currentTurn]?.ownership { latestOwnership = ownership }
+            updateTerritory()
+        }
     }
     @Published var isEndGameScoring: Bool = false {
         didSet {
-            if isEndGameScoring { showRealTimeTerritory = false; if let own = latestOwnership { seedDeadStones(ownership: own) } }
+            if isEndGameScoring {
+                showRealTimeTerritory = false
+                if let ownership = moveAnalyses[currentTurn]?.ownership { latestOwnership = ownership }
+                if let own = latestOwnership { seedDeadStones(ownership: own) }
+            }
             else { deadStones.removeAll() }
             updateTerritory()
         }
@@ -100,15 +176,12 @@ final class GoGameViewModel: ObservableObject {
         isAIBattleMode && currentPlayer == aiPlayerColor && !isGameOver && !isReviewMode
     }
 
+    var shouldShowAICoachHints: Bool {
+        isAIBattleMode && isAICoachHintEnabled && !isAITurn && !isReviewMode
+    }
+
     private var aiBattleMaxVisits: Int {
-        switch size {
-        case 9:
-            return moves.count < 10 ? 120 : 90
-        case 13:
-            return moves.count < 14 ? 180 : 120
-        default:
-            return moves.count < 18 ? 320 : 180
-        }
+        aiDifficulty.maxVisits(boardSize: size, moveCount: moves.count)
     }
 
     init(size: Int = 19) {
@@ -138,6 +211,11 @@ final class GoGameViewModel: ObservableObject {
         }
         engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath)
         isEngineReady = true
+    }
+
+    private func ensureEngineStarted() -> Bool {
+        startEngine()
+        return isEngineReady
     }
     
     // 🚨 修正：将 handleKataGoJSON 独立出来，不再嵌套在别的方法内部
@@ -273,12 +351,21 @@ final class GoGameViewModel: ObservableObject {
             let wrDrop = lastPlayer == .black ? (previous.winrate - current.winrate) : (current.winrate - previous.winrate)
             let slDrop = lastPlayer == .black ? (previous.scoreLead - current.scoreLead) : (current.scoreLead - previous.scoreLead)
             
-            if let actual = actualPt, let best = previous.bestMove, actual != best && wrDrop > 0.05 {
+            let shouldComment = wrDrop > 0.02 && (actualPt != previous.bestMove || slDrop > 2.0)
+
+            if let actual = actualPt, let best = previous.bestMove, shouldComment {
                 let wrPercent = String(format: "%.1f%%", wrDrop * 100)
                 let slPoints = String(format: "%.1f", slDrop)
-                let rating = wrDrop > 0.20 ? "惊天大恶手 📉" : "缓手/失误 ⚠️"
+                let rating: String
+                if wrDrop > 0.20 {
+                    rating = "重大失误"
+                } else if wrDrop > 0.08 {
+                    rating = "明显失误"
+                } else {
+                    rating = "可改进的一手"
+                }
                 
-                blunderMessage = "\(rating)\n胜率暴跌 \(wrPercent) (亏损 \(slPoints) 目)"
+                blunderMessage = "\(rating)\n胜率损失 \(wrPercent) (目差约 \(slPoints) 目)"
                 previousBestMove = best
                 tutorExplanation = ""
                 isTutorThinking = true
@@ -396,10 +483,11 @@ final class GoGameViewModel: ObservableObject {
     
     func loadGame(from url: URL) {
         cancelPendingAIMove()
-        self.currentFileURL = url
         do {
-            let data = try Data(contentsOf: url); let savedGame = try JSONDecoder().decode(SavedGame.self, from: data)
-            self.moves = savedGame.moves; self.moveAnalyses = savedGame.analyses; self.isReviewMode = true
+            let data = try Data(contentsOf: url)
+            let savedGame = try SavedGame.parse(from: data, preferredFileExtension: url.pathExtension)
+            self.currentFileURL = url.pathExtension.lowercased() == "json" ? url : nil
+            load(savedGame)
             
             if !self.moveAnalyses.isEmpty && self.moveAnalyses.count > self.moves.count {
                 self.analysisProgress = 1.0
@@ -409,6 +497,28 @@ final class GoGameViewModel: ObservableObject {
             }
             setTurn(0)
         } catch { print("❌ 读取失败: \(error)") }
+    }
+
+    private func load(_ savedGame: SavedGame) {
+        cancelScheduledAnalysis(clearInFlightState: true)
+        size = savedGame.size
+        board = Array(repeating: Array(repeating: .empty, count: savedGame.size), count: savedGame.size)
+        currentPlayer = .black
+        capturesBlack = 0
+        capturesWhite = 0
+        consecutivePasses = 0
+        isGameOver = false
+        lastMove = nil
+        lastIllegalReason = nil
+        snapshots = []
+        positionHistory = [Self.hashBoard(board)]
+        latestOwnership = nil
+        currentAnalysis = nil
+        deadStones = []
+        moves = savedGame.moves
+        moveAnalyses = savedGame.analyses
+        isReviewMode = true
+        currentTurn = 0
     }
     
     func setTurn(_ turn: Int) {
@@ -426,6 +536,7 @@ final class GoGameViewModel: ObservableObject {
         for i in 0..<targetTurn {
             let move = moves[i], color = move.player
             if case .place(let p) = move.kind {
+                guard inBounds(p) else { continue }
                 board[p.r][p.c] = color; var capturedPoints: [Point] = []
                 for nb in neighbors(of: p) { if board[nb.r][nb.c] == color.opponent { let group = collectGroup(board: board, start: nb); if liberties(of: group, board: board) == 0 { capturedPoints.append(contentsOf: group) } } }
                 for cp in capturedPoints { board[cp.r][cp.c] = .empty }; if color == .black { capturesBlack += capturedPoints.count } else { capturesWhite += capturedPoints.count }
@@ -510,11 +621,12 @@ final class GoGameViewModel: ObservableObject {
         if isAIBattleMode {
             if currentPlayer == aiPlayerColor {
                 requestSingleAnalysis(maxVisits: aiBattleMaxVisits)
-            } else {
+            } else if isAICoachHintEnabled || isTutorMode {
                 analysisTask = Task {
-                    try? await Task.sleep(for: .milliseconds(700))
+                    try? await Task.sleep(for: .milliseconds(500))
                     guard !Task.isCancelled else { return }
-                    self.requestSingleAnalysis(maxVisits: 24, includeOwnership: false, idSuffix: "human_hint")
+                    let visits = self.isAICoachHintEnabled ? max(18, self.aiBattleMaxVisits / 4) : 24
+                    self.requestSingleAnalysis(maxVisits: visits, includeOwnership: true, idSuffix: "human_hint")
                 }
             }
             return
@@ -530,6 +642,8 @@ final class GoGameViewModel: ObservableObject {
     
     // MARK: - 网络请求
     private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
+        guard ensureEngineStarted() else { return }
+
         var gtpMoves: [[String]] = []
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
@@ -565,6 +679,8 @@ final class GoGameViewModel: ObservableObject {
     }
     
     private func requestBatchAnalysis() {
+        guard ensureEngineStarted() else { return }
+
         var gtpMoves: [[String]] = []
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
@@ -601,7 +717,10 @@ final class GoGameViewModel: ObservableObject {
         guard showRealTimeTerritory || isEndGameScoring else {
             currentAnalysis = nil; deadStones.removeAll(); return
         }
-        guard let ownership = latestOwnership else { return }
+        if latestOwnership == nil, let ownership = moveAnalyses[currentTurn]?.ownership {
+            latestOwnership = ownership
+        }
+        guard let ownership = latestOwnership, ownership.count == size * size else { return }
         
         if showRealTimeTerritory { seedDeadStones(ownership: ownership) }
         

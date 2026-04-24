@@ -16,7 +16,7 @@ struct PrisonerPill: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.6), in: Capsule())
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: Capsule())
         .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }

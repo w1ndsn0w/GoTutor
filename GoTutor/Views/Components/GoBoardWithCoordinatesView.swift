@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct GoBoardWithCoordinatesView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @ObservedObject var game: GoGameViewModel
     @Binding var hoverPoint: Point?
 
@@ -55,7 +57,7 @@ struct GoBoardWithCoordinatesView: View {
                 Color(red: 0.85, green: 0.65, blue: 0.40).shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
             } else {
                 // 【适配 iPad】替换 NSColor
-                Color(UIColor.secondarySystemBackground).shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                Color(UIColor.secondarySystemBackground).shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.1), radius: 4, x: 0, y: 2)
             }
         }
     }
@@ -98,7 +100,7 @@ struct GoBoardWithCoordinatesView: View {
                 path.move(to: CGPoint(x: margin, y: pos)); path.addLine(to: CGPoint(x: maxPos, y: pos))
                 path.move(to: CGPoint(x: pos, y: margin)); path.addLine(to: CGPoint(x: pos, y: maxPos))
             }
-        }.stroke(Color.black.opacity(0.6), lineWidth: 1)
+        }.stroke(boardLineColor, lineWidth: 1)
     }
 
     private func drawStarPoints(cellSize: CGFloat, margin: CGFloat) -> some View {
@@ -111,7 +113,7 @@ struct GoBoardWithCoordinatesView: View {
             }
         }
         return ForEach(starPoints, id: \.self) { pt in
-            Circle().fill(Color.black.opacity(0.8)).frame(width: cellSize * 0.2, height: cellSize * 0.2)
+            Circle().fill(boardLineColor.opacity(0.9)).frame(width: cellSize * 0.2, height: cellSize * 0.2)
                 .position(x: margin + CGFloat(pt.c) * cellSize, y: margin + CGFloat(pt.r) * cellSize)
         }
     }
@@ -126,7 +128,7 @@ struct GoBoardWithCoordinatesView: View {
                         Circle()
                             .fill(stone == .black ? Color.black : Color.white)
                             .shadow(color: .black.opacity(isDead ? 0.0 : 0.3), radius: 1.5, x: 1, y: 1)
-                            .overlay(Circle().stroke(stone == .white ? Color.black.opacity(0.15) : Color.clear, lineWidth: 0.5))
+                            .overlay(Circle().stroke(stone == .white ? Color.black.opacity(0.25) : Color.white.opacity(colorScheme == .dark ? 0.18 : 0), lineWidth: 0.7))
                             .opacity(isDead ? 0.3 : 1.0)
                         
                         if isDead { Image(systemName: "xmark").font(.system(size: cellSize * 0.6, weight: .heavy)).foregroundColor(.red.opacity(0.85)) }
@@ -162,10 +164,12 @@ struct GoBoardWithCoordinatesView: View {
         return ZStack {
             ForEach(Array(territory.blackTerritory), id: \.self) { pt in
                 Rectangle().fill(Color.black).frame(width: markerSize, height: markerSize)
+                    .overlay(Rectangle().stroke(Color.white.opacity(0.5), lineWidth: 0.5))
                     .position(x: margin + CGFloat(pt.c) * cellSize, y: margin + CGFloat(pt.r) * cellSize)
             }
             ForEach(Array(territory.whiteTerritory), id: \.self) { pt in
                 Rectangle().fill(Color.white).frame(width: markerSize, height: markerSize)
+                    .overlay(Rectangle().stroke(Color.black.opacity(0.45), lineWidth: 0.5))
                     .position(x: margin + CGFloat(pt.c) * cellSize, y: margin + CGFloat(pt.r) * cellSize)
             }
         }
@@ -174,22 +178,21 @@ struct GoBoardWithCoordinatesView: View {
         ZStack {
             ForEach(0..<game.size, id: \.self) { c in
                 let x = padding + margin + CGFloat(c) * cellSize
-                Text(letters[c]).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(.black.opacity(0.6)).position(x: x, y: padding / 2)
-                Text(letters[c]).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(.black.opacity(0.6)).position(x: x, y: padding + boardDimension + padding / 2)
+                Text(letters[c]).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(coordinateColor).position(x: x, y: padding / 2)
+                Text(letters[c]).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(coordinateColor).position(x: x, y: padding + boardDimension + padding / 2)
             }
             ForEach(0..<game.size, id: \.self) { r in
                 let y = padding + margin + CGFloat(r) * cellSize
                 let label = "\(game.size - r)"
-                Text(label).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(.black.opacity(0.6)).position(x: padding / 2, y: y)
-                Text(label).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(.black.opacity(0.6)).position(x: padding + boardDimension + padding / 2, y: y)
+                Text(label).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(coordinateColor).position(x: padding / 2, y: y)
+                Text(label).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(coordinateColor).position(x: padding + boardDimension + padding / 2, y: y)
             }
         }
     }
     // ✅ 绘制数字 1、2、3 候选点
     private func drawCandidateMoves(cellSize: CGFloat, margin: CGFloat) -> some View {
         Group {
-            let isHumanAITurn = game.isAIBattleMode && game.currentPlayer != game.aiPlayerColor
-            if (game.isReviewMode || game.isTutorMode || isHumanAITurn), let analysis = game.moveAnalyses[game.currentTurn] {
+            if (game.isReviewMode || game.isTutorMode || game.shouldShowAICoachHints), let analysis = game.moveAnalyses[game.currentTurn] {
                 ForEach(analysis.candidateMoves, id: \.order) { candidate in
                     // 动态将 "D4" 这种字符串翻译成屏幕坐标
                     if let pt = Point(gtp: candidate.move, boardSize: game.size),
@@ -220,6 +223,16 @@ struct GoBoardWithCoordinatesView: View {
         case 3: return .orange
         default: return .gray
         }
+    }
+
+    private var boardLineColor: Color {
+        if useWoodBackground { return Color.black.opacity(0.62) }
+        return colorScheme == .dark ? Color.white.opacity(0.58) : Color.black.opacity(0.6)
+    }
+
+    private var coordinateColor: Color {
+        if useWoodBackground { return Color.black.opacity(0.62) }
+        return colorScheme == .dark ? Color.white.opacity(0.68) : Color.black.opacity(0.6)
     }
 }
 #Preview(){

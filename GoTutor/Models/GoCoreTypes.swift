@@ -148,21 +148,168 @@ struct CandidateMove: Codable, Equatable, Sendable {
 }
 
 extension SavedGame {
+    enum RecordError: LocalizedError {
+        case invalidBoardSize(Int)
+        case invalidMoveCoordinate(turn: Int, point: Point)
+        case invalidSGFMove(turn: Int, value: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidBoardSize(let size):
+                return "不支持的棋盘路数：\(size)"
+            case .invalidMoveCoordinate(let turn, let point):
+                return "第 \(turn) 手坐标越界：(\(point.r), \(point.c))"
+            case .invalidSGFMove(let turn, let value):
+                return "第 \(turn) 手 SGF 坐标无效：\(value)"
+            }
+        }
+    }
+
     // 明确告诉编译器，解码动作不需要主线程
     nonisolated static func parse(from data: Data) throws -> SavedGame {
-        return try JSONDecoder().decode(SavedGame.self, from: data)
+        return try JSONDecoder().decode(SavedGame.self, from: data).validated()
+    }
+
+    nonisolated static func parse(from data: Data, preferredFileExtension: String?) throws -> SavedGame {
+        let fileExtension = preferredFileExtension?.lowercased()
+        if fileExtension == "sgf" {
+            guard let sgf = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return try SavedGame(sgf: sgf).validated()
+        }
+
+        if let content = String(data: data, encoding: .utf8),
+           content.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("(") {
+            return try SavedGame(sgf: content).validated()
+        }
+
+        return try parse(from: data)
     }
     
     // 明确告诉编译器，编码动作不需要主线程
     nonisolated func toData() throws -> Data {
         return try JSONEncoder().encode(self)
     }
+
+    nonisolated func toSGFData() throws -> Data {
+        guard let data = toSGFString().data(using: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
+        }
+        return data
+    }
+
+    nonisolated func toSGFString() -> String {
+        var sgf = "(;GM[1]FF[4]CA[UTF-8]AP[GoTutor]SZ[\(size)]DT[\(Self.sgfDateString(from: date))]KM[7.5]"
+        for move in moves {
+            let player = move.player == .black ? "B" : "W"
+            switch move.kind {
+            case .place(let point):
+                sgf += ";\(player)[\(point.toSGF(boardSize: size))]"
+            case .pass:
+                sgf += ";\(player)[]"
+            }
+        }
+        sgf += ")"
+        return sgf
+    }
+
+    nonisolated init(sgf: String) throws {
+        let tree = try SGFParser.parse(string: sgf)
+        let root = tree.rootNode
+        let boardSize = Self.parseSGFBoardSize(root.properties["SZ"]?.first)
+        let date = Self.parseSGFDate(root.properties["DT"]?.first) ?? Date()
+
+        var parsedMoves: [Move] = []
+        var node: SGFNode? = root
+        while let current = node {
+            if let blackMove = current.properties["B"]?.first {
+                parsedMoves.append(try Self.move(player: .black, sgfValue: blackMove, turn: parsedMoves.count + 1, boardSize: boardSize))
+            } else if let whiteMove = current.properties["W"]?.first {
+                parsedMoves.append(try Self.move(player: .white, sgfValue: whiteMove, turn: parsedMoves.count + 1, boardSize: boardSize))
+            }
+            node = current.children.first
+        }
+
+        self.init(size: boardSize, date: date, moves: parsedMoves, analyses: [:])
+    }
+
+    nonisolated func validated() throws -> SavedGame {
+        guard (2...19).contains(size) else { throw RecordError.invalidBoardSize(size) }
+
+        for (index, move) in moves.enumerated() {
+            switch move.kind {
+            case .place(let point):
+                guard point.isOnBoard(size: size) else {
+                    throw RecordError.invalidMoveCoordinate(turn: index + 1, point: point)
+                }
+            case .pass:
+                break
+            }
+
+            for point in move.captured {
+                guard point.isOnBoard(size: size) else {
+                    throw RecordError.invalidMoveCoordinate(turn: index + 1, point: point)
+                }
+            }
+        }
+
+        let filteredAnalyses = analyses.reduce(into: [Int: MoveAnalysis]()) { result, item in
+            let (turn, analysis) = item
+            guard turn >= 0 && turn <= moves.count else { return }
+            let ownership = analysis.ownership?.count == size * size ? analysis.ownership : nil
+            result[turn] = MoveAnalysis(
+                winrate: analysis.winrate,
+                scoreLead: analysis.scoreLead,
+                ownership: ownership,
+                bestMove: analysis.bestMove?.isOnBoard(size: size) == true ? analysis.bestMove : nil,
+                candidateMoves: analysis.candidateMoves
+            )
+        }
+
+        return SavedGame(size: size, date: date, moves: moves, analyses: filteredAnalyses)
+    }
+
+    private nonisolated static func move(player: Stone, sgfValue: String, turn: Int, boardSize: Int) throws -> Move {
+        let value = sgfValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty || value.lowercased() == "tt" {
+            return Move(player: player, kind: .pass, captured: [])
+        }
+        guard let point = Point(sgf: value, boardSize: boardSize) else {
+            throw RecordError.invalidSGFMove(turn: turn, value: sgfValue)
+        }
+        return Move(player: player, kind: .place(point), captured: [])
+    }
+
+    private nonisolated static func sgfDateString(from date: Date) -> String {
+        sgfDateFormatter().string(from: date)
+    }
+
+    private nonisolated static func parseSGFDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let firstDate = value.split(separator: ",").first.map(String.init) ?? value
+        return sgfDateFormatter().date(from: firstDate)
+    }
+
+    private nonisolated static func parseSGFBoardSize(_ value: String?) -> Int {
+        guard let value else { return 19 }
+        let firstDimension = value.split(separator: ":").first.map(String.init) ?? value
+        return Int(firstDimension.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 19
+    }
+
+    private nonisolated static func sgfDateFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }
 }
 // MARK: - SGF 坐标转换
 
 extension Point {
     // 1. 从 SGF 坐标串初始化 (例如 "pd" -> r: 3, c: 15)
-    init?(sgf: String) {
+    nonisolated init?(sgf: String, boardSize: Int = 19) {
         guard sgf.count == 2 else { return nil }
         let chars = Array(sgf.lowercased())
         let cChar = chars[0].asciiValue ?? 0
@@ -175,14 +322,19 @@ extension Point {
         self.r = Int(rChar - aValue)
         
         // 简单越界保护 (允许 pass 等特殊情况，但只解析盘内坐标)
-        guard c >= 0 && c < 19 && r >= 0 && r < 19 else { return nil }
+        guard isOnBoard(size: boardSize) else { return nil }
     }
     
     // 2. 导出为 SGF 格式坐标 (方便以后保存用户的修改)
-    func toSGF() -> String {
+    nonisolated func toSGF(boardSize: Int = 19) -> String {
+        guard isOnBoard(size: boardSize) else { return "" }
         let aValue = Int(Character("a").asciiValue ?? 97)
         let cStr = String(UnicodeScalar(aValue + self.c)!)
         let rStr = String(UnicodeScalar(aValue + self.r)!)
         return "\(cStr)\(rStr)"
+    }
+
+    nonisolated func isOnBoard(size: Int) -> Bool {
+        r >= 0 && r < size && c >= 0 && c < size
     }
 }

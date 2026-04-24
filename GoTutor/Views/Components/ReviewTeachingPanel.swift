@@ -31,7 +31,7 @@ struct ReviewTeachingPanel: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder
@@ -56,7 +56,7 @@ struct ReviewTeachingPanel: View {
                     }
                     ProgressView(value: bWin, total: 100)
                         .tint(.black)
-                        .background(Color.white)
+                        .background(Color(UIColor.tertiarySystemFill))
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.gray.opacity(0.3), lineWidth: 1))
 
@@ -72,11 +72,11 @@ struct ReviewTeachingPanel: View {
                     .font(.system(size: 15, weight: .bold, design: .monospaced))
                     .padding(.vertical, 8)
                     .padding(.horizontal, 14)
-                    .background(lead > 0 ? Color.black.opacity(0.1) : Color.white, in: Capsule())
+                    .background(lead > 0 ? Color.primary.opacity(0.1) : Color(UIColor.tertiarySystemFill), in: Capsule())
                     .overlay(Capsule().stroke(Color.gray.opacity(0.2), lineWidth: 1))
             }
             .padding()
-            .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         } else {
             VStack(spacing: 10) {
                 ProgressView()
@@ -86,7 +86,7 @@ struct ReviewTeachingPanel: View {
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
@@ -139,14 +139,14 @@ struct ReviewTeachingPanel: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var territoryToggle: some View {
         Toggle("显示地盘归属", isOn: $game.showRealTimeTerritory)
             .toggleStyle(SwitchToggleStyle(tint: .blue))
             .padding()
-            .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func teachingPlaceholder(_ text: String) -> some View {
@@ -159,7 +159,7 @@ struct ReviewTeachingPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -224,7 +224,7 @@ struct TeachingFeedbackCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(severityColor(feedback.severity).opacity(0.25), lineWidth: 1))
     }
 }

@@ -29,7 +29,7 @@ struct SGFParser: Sendable {
     }
     
     // 核心解析入口
-    static func parse(string: String) throws -> SGFGameTree {
+    nonisolated static func parse(string: String) throws -> SGFGameTree {
         let content = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { throw SGFError.emptyString }
         
@@ -131,12 +131,12 @@ struct SGFParser: Sendable {
 }
 
 // 内部构建器（Class 方便处理树形嵌套的引用，构建完后抛弃）
-private class NodeBuilder {
-    var properties: [String: [String]] = [:]
-    var children: [NodeBuilder] = []
+private final class NodeBuilder: @unchecked Sendable {
+    nonisolated(unsafe) var properties: [String: [String]] = [:]
+    nonisolated(unsafe) var children: [NodeBuilder] = []
     
     // 递归将 Class 树转换为 Struct 树 (剥离引用，实现并发安全)
-    func toSGFNode() -> SGFNode {
+    nonisolated func toSGFNode() -> SGFNode {
         return SGFNode(properties: properties, children: children.map { $0.toSGFNode() })
     }
 }
