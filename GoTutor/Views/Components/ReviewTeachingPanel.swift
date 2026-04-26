@@ -2,11 +2,13 @@ import SwiftUI
 
 struct ReviewTeachingPanel: View {
     @ObservedObject var game: GoGameViewModel
+    let phaseClassifier: GamePhaseClassifier
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 analysisProgress
+                currentGamePhase
                 currentPositionEvaluation
                 currentTeachingFeedback
                 keyMistakes
@@ -18,13 +20,54 @@ struct ReviewTeachingPanel: View {
         .background(.ultraThinMaterial)
     }
 
+    private var currentGamePhase: some View {
+        let phase = phaseClassifier.phase(for: game.currentTurn)
+        let span = phaseClassifier.span(for: phase)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: phase.iconName)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(phase.tint)
+                    .frame(width: 34, height: 34)
+                    .background(phase.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("当前阶段 · \(phaseClassifier.methodText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(phase.title)
+                        .font(.headline)
+                }
+
+                Spacer()
+
+                if let span {
+                    Text(span.turnText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(phase.tint)
+                }
+            }
+
+            Text(phase.subtitle)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+
+            phaseChecklist(for: phase)
+        }
+        .padding()
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(phase.tint.opacity(0.22), lineWidth: 1))
+    }
+
     private var analysisProgress: some View {
         VStack(spacing: 8) {
             if game.analysisProgress < 1.0 {
-                ProgressView("AI 正在批量分析...", value: game.analysisProgress, total: 1.0)
+                ProgressView("高段 AI 正在批量分析...", value: game.analysisProgress, total: 1.0)
                     .progressViewStyle(.linear)
             } else {
-                Label("全盘分析完毕", systemImage: "checkmark.circle.fill")
+                Label("高段 AI 分析完毕", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.system(size: 15, weight: .medium))
             }
@@ -103,38 +146,66 @@ struct ReviewTeachingPanel: View {
 
     private var keyMistakes: some View {
         let feedbacks = game.keyTeachingFeedbacks()
+        let groupedFeedbacks = Dictionary(grouping: feedbacks) { feedback in
+            phaseClassifier.phase(for: feedback.turn)
+        }
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("本局关键失误")
-                .font(.headline)
+            HStack {
+                Text("本局关键失误")
+                    .font(.headline)
+                Spacer()
+                Text("按阶段")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if feedbacks.isEmpty {
                 Text(game.analysisProgress < 1.0 ? "分析完成后会列出最值得复盘的手。" : "目前没有明显失误手。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(feedbacks) { feedback in
-                    Button(action: { game.setTurn(feedback.turn) }) {
-                        HStack(spacing: 10) {
-                            Text("\(feedback.turn)")
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .frame(width: 34, height: 28)
-                                .background(severityColor(feedback.severity).opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(feedback.severity.rawValue) · \(feedback.category.rawValue)")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                Text("损失 \(String(format: "%.1f%%", feedback.winrateDrop * 100))，实战 \(feedback.playedMove)")
+                ForEach(GamePhase.allCases) { phase in
+                    if let phaseFeedbacks = groupedFeedbacks[phase], !phaseFeedbacks.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: phase.iconName)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Text(phase.title)
+                                    .font(.caption.weight(.semibold))
+                                Text("\(phaseFeedbacks.count)")
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(phase.tint.opacity(0.14), in: Capsule())
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                            .foregroundStyle(phase.tint)
+
+                            ForEach(phaseFeedbacks) { feedback in
+                                Button(action: { game.setTurn(feedback.turn) }) {
+                                    HStack(spacing: 10) {
+                                        Text("\(feedback.turn)")
+                                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                            .frame(width: 34, height: 28)
+                                            .background(severityColor(feedback.severity).opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("\(feedback.severity.rawValue) · \(feedback.category.rawValue)")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                            Text("损失 \(String(format: "%.1f%%", feedback.winrateDrop * 100))，实战 \(feedback.playedMove)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -160,6 +231,34 @@ struct ReviewTeachingPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func phaseChecklist(for phase: GamePhase) -> some View {
+        let items: [String]
+        switch phase {
+        case .opening:
+            items = ["角、边、大场的效率", "双方弱棋与势力方向", "是否过早进入小范围接触"]
+        case .middleGame:
+            items = ["攻防目标是否清楚", "孤棋安定和连接", "局部得失是否服务全局"]
+        case .endgame:
+            items = ["先手官子和逆收价值", "边界是否已经定型", "每手实际目数收益"]
+        case .finished:
+            items = ["确认无劫争", "确认死活无争议", "进入数子或点目"]
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 7) {
+                    Circle()
+                        .fill(phase.tint)
+                        .frame(width: 5, height: 5)
+                        .padding(.top, 6)
+                    Text(item)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 

@@ -489,7 +489,7 @@ final class GoGameViewModel: ObservableObject {
             self.currentFileURL = url.pathExtension.lowercased() == "json" ? url : nil
             load(savedGame)
             
-            if !self.moveAnalyses.isEmpty && self.moveAnalyses.count > self.moves.count {
+            if self.moves.isEmpty {
                 self.analysisProgress = 1.0
             } else {
                 self.analysisProgress = 0.0
@@ -702,14 +702,19 @@ final class GoGameViewModel: ObservableObject {
             "boardXSize": size,
             "boardYSize": size,
             "analyzeTurns": Array(0...moves.count), // 批量分析 0 到最后一步
-            "maxVisits": 50,
-            "includeOwnership": true
+            "maxVisits": highRankReviewMaxVisits,
+            "includeOwnership": true,
+            "includePolicy": true
         ]
         
         if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             aiEngine.sendQuery(jsonString)
         }
+    }
+
+    private var highRankReviewMaxVisits: Int {
+        max(300, AIBattleDifficulty.pro9p.maxVisits(boardSize: size, moveCount: moves.count))
     }
     
     // MARK: - 计目系统

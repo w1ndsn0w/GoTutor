@@ -156,7 +156,7 @@ struct GameScreen: View {
                     }
             }
         }
-        .sheet(isPresented: $showTsumegoSheet) {
+        .fullScreenCover(isPresented: $showTsumegoSheet) {
             TsumegoListView(showsCloseButton: true)
         }
         .alert("文件操作", isPresented: $showFileAlert) {

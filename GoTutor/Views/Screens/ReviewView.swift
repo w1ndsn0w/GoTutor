@@ -7,6 +7,16 @@ struct ReviewView: View {
     // 复盘页面拥有一个独立的“大脑”
     @StateObject private var game = GoGameViewModel()
 
+    private var phaseClassifier: GamePhaseClassifier {
+        GamePhaseClassifier(
+            totalMoves: game.moves.count,
+            boardSize: game.size,
+            moves: game.moves,
+            analyses: game.moveAnalyses,
+            analysisProgress: game.analysisProgress
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // ====================
@@ -53,6 +63,9 @@ struct ReviewView: View {
                         
                         // 底部控制台：Slider 和 按钮完美移植
                         VStack(spacing: 12) {
+                            ReviewPhaseTimeline(classifier: phaseClassifier, currentTurn: game.currentTurn)
+                                .padding(.horizontal, 40)
+
                             HStack {
                                 Text("0").font(.caption).foregroundStyle(.secondary)
                                 Slider(
@@ -85,11 +98,60 @@ struct ReviewView: View {
                 
                 Divider()
                 
-                ReviewTeachingPanel(game: game)
+                ReviewTeachingPanel(game: game, phaseClassifier: phaseClassifier)
             }
         }
         .onAppear {
             game.loadGame(from: fileURL)
+        }
+    }
+}
+
+private struct ReviewPhaseTimeline: View {
+    let classifier: GamePhaseClassifier
+    let currentTurn: Int
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach(classifier.spans) { span in
+                    let isActive = classifier.phase(for: currentTurn) == span.phase
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 5) {
+                            Image(systemName: span.phase.iconName)
+                                .font(.caption2.weight(.bold))
+                            Text(span.phase.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        Text(span.turnText)
+                            .font(.caption2)
+                            .foregroundStyle(isActive ? span.phase.tint : .secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(span.phase.tint.opacity(isActive ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(span.phase.tint.opacity(isActive ? 0.65 : 0.18), lineWidth: 1))
+                    .foregroundStyle(isActive ? span.phase.tint : .secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("当前阶段")
+                    .foregroundStyle(.secondary)
+                Text(classifier.phase(for: currentTurn).title)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(classifier.phase(for: currentTurn).tint)
+                Text(classifier.methodText)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text(classifier.phase(for: currentTurn).subtitle)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .font(.caption)
         }
     }
 }
