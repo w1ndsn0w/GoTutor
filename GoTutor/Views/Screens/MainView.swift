@@ -48,6 +48,12 @@ struct MainView: View {
 }
 
 // MARK: - GameScreen (主控页面)
+private struct ReviewPresentation: Identifiable {
+    let id = UUID()
+    let url: URL
+    let usesSecurityScopedResource: Bool
+}
+
 struct GameScreen: View {
     let size: Int; let boardPixelSize: CGFloat
     let showCoordinates: Bool; let showStarPoints: Bool; let showHoverGhost: Bool; let showLastMoveMark: Bool; let useWoodBackground: Bool
@@ -56,13 +62,16 @@ struct GameScreen: View {
     @StateObject private var game: GoGameViewModel
     @State private var hoverPoint: Point? = nil
     @State private var showGameOverAlert = false
-    @State private var reviewFileURL: URL? = nil
+    @State private var activeReview: ReviewPresentation?
+    @State private var pendingLibraryReviewURL: URL? = nil
     // 【适配 iPad】处理文件导入导出和复盘弹窗
     @State private var showFileImporter = false
-    @State private var showReviewSheet = false
-    @State private var showFileExporter = false
+    @State private var showRecordLibrary = false
+    @State private var showSaveSheet = false
     @State private var showTsumegoSheet = false
-    @State private var documentToSave: GoGameDocument?
+    @State private var saveTitle = ""
+    @State private var saveBlackPlayerName = ""
+    @State private var saveWhitePlayerName = ""
     @State private var fileAlertMessage = ""
     @State private var showFileAlert = false
 
@@ -124,37 +133,33 @@ struct GameScreen: View {
                     showFileAlert = true
                     return
                 }
-                self.reviewFileURL = url
-                self.showReviewSheet = true
+                self.activeReview = ReviewPresentation(url: url, usesSecurityScopedResource: true)
             case .failure(let error):
                 fileAlertMessage = "读取失败：\(error.localizedDescription)"
                 showFileAlert = true
             }
         }
-        // 系统原生保存面板
-         .fileExporter(
-             isPresented: $showFileExporter,
-             document: documentToSave,
-             contentType: .smartGameFormat,
-             defaultFilename: "GoTutor_棋谱_\(Int(Date().timeIntervalSince1970)).sgf"
-         ) { result in
-             switch result {
-             case .success(let url):
-                 fileAlertMessage = "棋谱已保存至：\(url.lastPathComponent)"
-                 showFileAlert = true
-             case .failure(let error):
-                 fileAlertMessage = "保存失败：\(error.localizedDescription)"
-                 showFileAlert = true
-             }
-         }
-        // 2. 挂载复盘页 (全屏覆盖)
-        .fullScreenCover(isPresented: $showReviewSheet) {
-            if let url = reviewFileURL {
-                ReviewView(fileURL: url)
-                    .onDisappear {
-                        url.stopAccessingSecurityScopedResource()
-                    }
+        .sheet(isPresented: $showSaveSheet) {
+            SaveGameSheet(
+                title: $saveTitle,
+                blackPlayerName: $saveBlackPlayerName,
+                whitePlayerName: $saveWhitePlayerName,
+                onSave: saveCurrentGameToLibrary
+            )
+        }
+        .sheet(isPresented: $showRecordLibrary, onDismiss: openPendingLibraryRecord) {
+            GameRecordListView { record in
+                pendingLibraryReviewURL = record.url
             }
+        }
+        // 2. 挂载复盘页 (全屏覆盖)
+        .fullScreenCover(item: $activeReview) { presentation in
+            ReviewView(fileURL: presentation.url)
+                .onDisappear {
+                    if presentation.usesSecurityScopedResource {
+                        presentation.url.stopAccessingSecurityScopedResource()
+                    }
+                }
         }
         .fullScreenCover(isPresented: $showTsumegoSheet) {
             TsumegoListView(showsCloseButton: true)
@@ -209,16 +214,61 @@ struct GameScreen: View {
 
     private var fileTrainingGroup: some View {
         HStack(spacing: 8) {
+            Button(action: { showRecordLibrary = true }) { Label("棋谱", systemImage: "books.vertical") }
             Button(action: { showFileImporter = true }) { Label("读谱", systemImage: "folder") }
             Button(action: {
-                // 1. 生成数据装进快递盒
-                documentToSave = GoGameDocument(savedGame: game.generateSaveData())
-                // 2. 唤醒系统的保存面板
-                showFileExporter = true
+                prepareSaveSheet()
             }) { Label("保存", systemImage: "square.and.arrow.down") }
             Button(action: { showTsumegoSheet = true }) { Label("死活题", systemImage: "scope") }
         }
         .buttonStyle(HeaderButtonStyle())
+    }
+
+    private func prepareSaveSheet() {
+        saveBlackPlayerName = defaultPlayerName(for: .black)
+        saveWhitePlayerName = defaultPlayerName(for: .white)
+        saveTitle = defaultRecordTitle(blackPlayerName: saveBlackPlayerName, whitePlayerName: saveWhitePlayerName)
+        showSaveSheet = true
+    }
+
+    private func saveCurrentGameToLibrary() {
+        do {
+            let savedGame = game.generateSaveData(
+                title: normalizedSaveText(saveTitle),
+                blackPlayerName: normalizedSaveText(saveBlackPlayerName),
+                whitePlayerName: normalizedSaveText(saveWhitePlayerName)
+            )
+            let url = try GameRecordLibrary.save(savedGame)
+            showSaveSheet = false
+            fileAlertMessage = "棋谱已保存到应用内棋谱库：\(url.deletingPathExtension().lastPathComponent)"
+            showFileAlert = true
+        } catch {
+            fileAlertMessage = "保存失败：\(error.localizedDescription)"
+            showFileAlert = true
+        }
+    }
+
+    private func openPendingLibraryRecord() {
+        guard let url = pendingLibraryReviewURL else { return }
+        pendingLibraryReviewURL = nil
+        activeReview = ReviewPresentation(url: url, usesSecurityScopedResource: false)
+    }
+
+    private func defaultPlayerName(for stone: Stone) -> String {
+        guard game.isAIBattleMode, game.aiPlayerColor == stone else { return "" }
+        return "AI \(game.aiDifficulty.title)"
+    }
+
+    private func defaultRecordTitle(blackPlayerName: String, whitePlayerName: String) -> String {
+        if game.isAIBattleMode {
+            return "AI 陪练对局"
+        }
+        return "普通对局"
+    }
+
+    private func normalizedSaveText(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private var battleModeGroup: some View {

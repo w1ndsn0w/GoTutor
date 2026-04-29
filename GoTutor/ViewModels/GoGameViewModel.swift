@@ -160,6 +160,10 @@ final class GoGameViewModel: ObservableObject {
     private var snapshots: [GameSnapshot] = []
     private var positionHistory: Set<String> = []
     private var currentFileURL: URL? = nil
+    private var currentRecordDate: Date? = nil
+    private var currentRecordTitle: String? = nil
+    private var currentBlackPlayerName: String? = nil
+    private var currentWhitePlayerName: String? = nil
     
     // 【核心】接入单例引擎
     private let aiEngine = KataGoWrapper.shared()
@@ -167,6 +171,7 @@ final class GoGameViewModel: ObservableObject {
     private var analysisTimer: DispatchWorkItem?
     private var expectedBatchResponses = 0
     private var receivedBatchResponses = 0
+    private var completedBatchResponsesAtStart = 0
     private var notificationTask: Task<Void, Never>?
     private var aiMoveTask: Task<Void, Never>?
     private var pendingAIAnalysisTurn: Int? = nil
@@ -247,7 +252,9 @@ final class GoGameViewModel: ObservableObject {
             
             if responseId.hasSuffix("batch_review") {
                 self.receivedBatchResponses += 1
-                let progress = min(1.0, Double(self.receivedBatchResponses) / Double(max(1, self.expectedBatchResponses)))
+                let total = max(1, self.completedBatchResponsesAtStart + self.expectedBatchResponses)
+                let completed = self.completedBatchResponsesAtStart + self.receivedBatchResponses
+                let progress = min(1.0, Double(completed) / Double(total))
                 self.analysisProgress = progress
                 if progress >= 1.0 { self.autoSaveToCurrentFile() }
             }
@@ -467,6 +474,7 @@ final class GoGameViewModel: ObservableObject {
         snapshots = []; positionHistory = [Self.hashBoard(board)]
         showRealTimeTerritory = false; isEndGameScoring = false; latestOwnership = nil; moveAnalyses = [:]
         currentTurn = 0; isReviewMode = false; analysisProgress = 1.0
+        currentFileURL = nil; currentRecordDate = nil; currentRecordTitle = nil; currentBlackPlayerName = nil; currentWhitePlayerName = nil
         
         resetTutorUIForNewMove(isHuman: true)
         isAnalyzingTutor = false
@@ -491,9 +499,12 @@ final class GoGameViewModel: ObservableObject {
             
             if self.moves.isEmpty {
                 self.analysisProgress = 1.0
+            } else if savedGame.hasCompleteAIAnalysis {
+                self.analysisProgress = 1.0
             } else {
-                self.analysisProgress = 0.0
-                requestBatchAnalysis()
+                let missingTurns = savedGame.missingAnalysisTurns()
+                self.analysisProgress = Double(savedGame.analyzedTurnCount) / Double(max(1, savedGame.totalAnalysisTurnCount))
+                requestBatchAnalysis(analyzeTurns: missingTurns, completedAtStart: savedGame.analyzedTurnCount)
             }
             setTurn(0)
         } catch { print("❌ 读取失败: \(error)") }
@@ -517,6 +528,10 @@ final class GoGameViewModel: ObservableObject {
         deadStones = []
         moves = savedGame.moves
         moveAnalyses = savedGame.analyses
+        currentRecordDate = savedGame.date
+        currentRecordTitle = savedGame.title
+        currentBlackPlayerName = savedGame.blackPlayerName
+        currentWhitePlayerName = savedGame.whitePlayerName
         isReviewMode = true
         currentTurn = 0
     }
@@ -545,8 +560,16 @@ final class GoGameViewModel: ObservableObject {
         }
     }
     
-    func generateSaveData() -> SavedGame {
-        return SavedGame(size: size, date: Date(), moves: moves, analyses: moveAnalyses)
+    func generateSaveData(title: String? = nil, blackPlayerName: String? = nil, whitePlayerName: String? = nil) -> SavedGame {
+        return SavedGame(
+            size: size,
+            date: Date(),
+            title: title,
+            blackPlayerName: blackPlayerName,
+            whitePlayerName: whitePlayerName,
+            moves: moves,
+            analyses: moveAnalyses
+        )
     }
 
     func teachingFeedback(for turn: Int) -> TeachingFeedback? {
@@ -678,7 +701,12 @@ final class GoGameViewModel: ObservableObject {
         }
     }
     
-    private func requestBatchAnalysis() {
+    private func requestBatchAnalysis(analyzeTurns: [Int], completedAtStart: Int = 0) {
+        guard !analyzeTurns.isEmpty else {
+            analysisProgress = 1.0
+            autoSaveToCurrentFile()
+            return
+        }
         guard ensureEngineStarted() else { return }
 
         var gtpMoves: [[String]] = []
@@ -690,18 +718,19 @@ final class GoGameViewModel: ObservableObject {
             }
         }
         
-        expectedBatchResponses = moves.count + 1
+        expectedBatchResponses = analyzeTurns.count
         receivedBatchResponses = 0
-        analysisProgress = 0.0
+        completedBatchResponsesAtStart = completedAtStart
+        let total = max(1, completedAtStart + analyzeTurns.count)
+        analysisProgress = Double(completedAtStart) / Double(total)
         
-        // 🚨 修正：修复了刚才粘贴错的 analyzeTurns 和 id
         let queryDict: [String: Any] = [
             "id": "\(gameId)_batch_review",
             "moves": gtpMoves,
             "rules": "chinese",
             "boardXSize": size,
             "boardYSize": size,
-            "analyzeTurns": Array(0...moves.count), // 批量分析 0 到最后一步
+            "analyzeTurns": analyzeTurns,
             "maxVisits": highRankReviewMaxVisits,
             "includeOwnership": true,
             "includePolicy": true
@@ -766,7 +795,15 @@ final class GoGameViewModel: ObservableObject {
     
     private func autoSaveToCurrentFile() {
         guard let url = currentFileURL else { return }
-        let gameData = SavedGame(size: size, date: Date(), moves: moves, analyses: moveAnalyses)
+        let gameData = SavedGame(
+            size: size,
+            date: currentRecordDate ?? Date(),
+            title: currentRecordTitle,
+            blackPlayerName: currentBlackPlayerName,
+            whitePlayerName: currentWhitePlayerName,
+            moves: moves,
+            analyses: moveAnalyses
+        )
         try? JSONEncoder().encode(gameData).write(to: url)
     }
     

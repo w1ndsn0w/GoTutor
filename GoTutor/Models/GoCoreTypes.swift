@@ -92,6 +92,9 @@ struct MoveAnalysis: Codable, Equatable, Sendable {
 struct SavedGame: Sendable {
     let size: Int
     let date: Date
+    let title: String?
+    let blackPlayerName: String?
+    let whitePlayerName: String?
     let moves: [Move]
     let analyses: [Int: MoveAnalysis]
 }
@@ -99,13 +102,16 @@ struct SavedGame: Sendable {
 // 手动实现 Codable 并显式标记为 nonisolated，打破编译器的隔离推断
 extension SavedGame: Codable {
     enum CodingKeys: String, CodingKey {
-        case size, date, moves, analyses
+        case size, date, title, blackPlayerName, whitePlayerName, moves, analyses
     }
     
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.size = try container.decode(Int.self, forKey: .size)
         self.date = try container.decode(Date.self, forKey: .date)
+        self.title = try container.decodeIfPresent(String.self, forKey: .title)
+        self.blackPlayerName = try container.decodeIfPresent(String.self, forKey: .blackPlayerName)
+        self.whitePlayerName = try container.decodeIfPresent(String.self, forKey: .whitePlayerName)
         self.moves = try container.decode([Move].self, forKey: .moves)
         self.analyses = try container.decode([Int: MoveAnalysis].self, forKey: .analyses)
     }
@@ -114,6 +120,9 @@ extension SavedGame: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(self.size, forKey: .size)
         try container.encode(self.date, forKey: .date)
+        try container.encodeIfPresent(self.title, forKey: .title)
+        try container.encodeIfPresent(self.blackPlayerName, forKey: .blackPlayerName)
+        try container.encodeIfPresent(self.whitePlayerName, forKey: .whitePlayerName)
         try container.encode(self.moves, forKey: .moves)
         try container.encode(self.analyses, forKey: .analyses)
     }
@@ -201,6 +210,15 @@ extension SavedGame {
 
     nonisolated func toSGFString() -> String {
         var sgf = "(;GM[1]FF[4]CA[UTF-8]AP[GoTutor]SZ[\(size)]DT[\(Self.sgfDateString(from: date))]KM[7.5]"
+        if let title = Self.normalizedText(title) {
+            sgf += "GN[\(Self.escapedSGFValue(title))]"
+        }
+        if let blackPlayerName = Self.normalizedText(blackPlayerName) {
+            sgf += "PB[\(Self.escapedSGFValue(blackPlayerName))]"
+        }
+        if let whitePlayerName = Self.normalizedText(whitePlayerName) {
+            sgf += "PW[\(Self.escapedSGFValue(whitePlayerName))]"
+        }
         for move in moves {
             let player = move.player == .black ? "B" : "W"
             switch move.kind {
@@ -219,6 +237,9 @@ extension SavedGame {
         let root = tree.rootNode
         let boardSize = Self.parseSGFBoardSize(root.properties["SZ"]?.first)
         let date = Self.parseSGFDate(root.properties["DT"]?.first) ?? Date()
+        let title = root.properties["GN"]?.first
+        let blackPlayerName = root.properties["PB"]?.first
+        let whitePlayerName = root.properties["PW"]?.first
 
         var parsedMoves: [Move] = []
         var node: SGFNode? = root
@@ -231,7 +252,15 @@ extension SavedGame {
             node = current.children.first
         }
 
-        self.init(size: boardSize, date: date, moves: parsedMoves, analyses: [:])
+        self.init(
+            size: boardSize,
+            date: date,
+            title: title,
+            blackPlayerName: blackPlayerName,
+            whitePlayerName: whitePlayerName,
+            moves: parsedMoves,
+            analyses: [:]
+        )
     }
 
     nonisolated func validated() throws -> SavedGame {
@@ -267,7 +296,15 @@ extension SavedGame {
             )
         }
 
-        return SavedGame(size: size, date: date, moves: moves, analyses: filteredAnalyses)
+        return SavedGame(
+            size: size,
+            date: date,
+            title: Self.normalizedText(title),
+            blackPlayerName: Self.normalizedText(blackPlayerName),
+            whitePlayerName: Self.normalizedText(whitePlayerName),
+            moves: moves,
+            analyses: filteredAnalyses
+        )
     }
 
     private nonisolated static func move(player: Stone, sgfValue: String, turn: Int, boardSize: Int) throws -> Move {
@@ -303,6 +340,18 @@ extension SavedGame {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
+    }
+
+    private nonisolated static func normalizedText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private nonisolated static func escapedSGFValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "]", with: "\\]")
     }
 }
 // MARK: - SGF 坐标转换
