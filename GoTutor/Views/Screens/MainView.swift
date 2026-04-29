@@ -69,6 +69,7 @@ struct GameScreen: View {
     @State private var showRecordLibrary = false
     @State private var showSaveSheet = false
     @State private var showTsumegoSheet = false
+    @State private var showPurePlayMode = false
     @State private var saveTitle = ""
     @State private var saveBlackPlayerName = ""
     @State private var saveWhitePlayerName = ""
@@ -164,6 +165,14 @@ struct GameScreen: View {
         .fullScreenCover(isPresented: $showTsumegoSheet) {
             TsumegoListView(showsCloseButton: true)
         }
+        .fullScreenCover(isPresented: $showPurePlayMode) {
+            PurePlayBoardView(
+                game: game,
+                showStarPoints: showStarPoints,
+                showLastMoveMark: showLastMoveMark,
+                useWoodBackground: useWoodBackground
+            )
+        }
         .alert("文件操作", isPresented: $showFileAlert) {
             Button("确定", role: .cancel) { }
         } message: {
@@ -183,6 +192,13 @@ struct GameScreen: View {
                 Divider().frame(height: 16)
 
                 battleModeGroup
+
+                Divider().frame(height: 16)
+
+                Button(action: { presentPurePlayMode() }) {
+                    Label("纯对弈", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                .buttonStyle(HeaderButtonStyle())
 
                 Divider().frame(height: 16)
 
@@ -269,6 +285,15 @@ struct GameScreen: View {
     private func normalizedSaveText(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func presentPurePlayMode() {
+        game.isAIBattleMode = false
+        game.isAICoachHintEnabled = false
+        game.isTutorMode = false
+        game.showRealTimeTerritory = false
+        game.isEndGameScoring = false
+        showPurePlayMode = true
     }
 
     private var battleModeGroup: some View {

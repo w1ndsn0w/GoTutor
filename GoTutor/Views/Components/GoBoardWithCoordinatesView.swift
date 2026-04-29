@@ -12,6 +12,7 @@ struct GoBoardWithCoordinatesView: View {
     let showLastMoveMark: Bool
     let useWoodBackground: Bool
     let territory: TerritoryAnalysis?
+    var showAnalysisOverlays: Bool = true
 
     private let letters = ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"]
 
@@ -19,10 +20,10 @@ struct GoBoardWithCoordinatesView: View {
         GeometryReader { geo in
             let minDimension = min(geo.size.width, geo.size.height)
             let padding: CGFloat = showCoordinates ? 28 : 0
-            let boardDimension = max( 0, minDimension - padding * 2)
+            let boardDimension = max(0, minDimension - padding * 2)
             let cellSize = game.size > 0 ? (boardDimension / CGFloat(game.size)) : 0
-                        let margin = cellSize / 2
-                        let isAITurn = game.isAITurn
+            let margin = cellSize / 2
+            let isAITurn = game.isAITurn
 
             ZStack {
                 boardBackground
@@ -32,9 +33,11 @@ struct GoBoardWithCoordinatesView: View {
                     drawGrid(cellSize: cellSize, margin: margin)
                     if showStarPoints { drawStarPoints(cellSize: cellSize, margin: margin) }
                     drawStones(cellSize: cellSize, margin: margin)
-                    drawTutorHint(cellSize: cellSize, margin: margin)
-                    drawReviewHint(cellSize: cellSize, margin: margin)
-                    drawCandidateMoves(cellSize: cellSize, margin: margin)
+                    if showAnalysisOverlays {
+                        drawTutorHint(cellSize: cellSize, margin: margin)
+                        drawReviewHint(cellSize: cellSize, margin: margin)
+                        drawCandidateMoves(cellSize: cellSize, margin: margin)
+                    }
                     
                     if !game.isEndGameScoring && !isAITurn && showHoverGhost { drawHoverGhost(cellSize: cellSize, margin: margin) }
                     if let territory = territory { drawTerritory(territory: territory, cellSize: cellSize, margin: margin) }
