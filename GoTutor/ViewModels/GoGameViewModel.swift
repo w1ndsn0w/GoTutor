@@ -250,14 +250,6 @@ final class GoGameViewModel: ObservableObject {
                 self.isHintThinking = false
             }
             
-            if responseId.hasSuffix("batch_review") {
-                self.receivedBatchResponses += 1
-                let total = max(1, self.completedBatchResponsesAtStart + self.expectedBatchResponses)
-                let completed = self.completedBatchResponsesAtStart + self.receivedBatchResponses
-                let progress = min(1.0, Double(completed) / Double(total))
-                self.analysisProgress = progress
-                if progress >= 1.0 { self.autoSaveToCurrentFile() }
-            }
             if let info = response.rootInfo, let wr = info.winrate, let sl = info.scoreLead {
                 var bestMovePt: Point? = nil
                 var candidates: [CandidateMove] = []
@@ -283,6 +275,15 @@ final class GoGameViewModel: ObservableObject {
                 }
                 
                 self.moveAnalyses[turn] = MoveAnalysis(winrate: wr, scoreLead: sl, ownership: response.ownership, bestMove: bestMovePt, candidateMoves: candidates)
+            }
+
+            if responseId.hasSuffix("batch_review") {
+                self.receivedBatchResponses += 1
+                let total = max(1, self.completedBatchResponsesAtStart + self.expectedBatchResponses)
+                let completed = self.completedBatchResponsesAtStart + self.receivedBatchResponses
+                let progress = min(1.0, Double(completed) / Double(total))
+                self.analysisProgress = progress
+                if progress >= 1.0 { self.autoSaveToCurrentFile() }
             }
             
             
@@ -743,7 +744,7 @@ final class GoGameViewModel: ObservableObject {
     }
 
     private var highRankReviewMaxVisits: Int {
-        max(300, AIBattleDifficulty.pro9p.maxVisits(boardSize: size, moveCount: moves.count))
+        max(64, AIBattleDifficulty.amateur3d.maxVisits(boardSize: size, moveCount: moves.count))
     }
     
     // MARK: - 计目系统
