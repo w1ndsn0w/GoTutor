@@ -18,10 +18,12 @@ struct PurePlayBoardView: View {
 
     private let timerPanelWidth: CGFloat = 112
     private let boardPadding: CGFloat = 12
+    private let controlDockLongSide: CGFloat = 306
 
     var body: some View {
         GeometryReader { proxy in
             let usesSideTimers = usesSideTimerLayout(in: proxy.size)
+            let usesStackedCompactControls = usesStackedCompactControlLayout(in: proxy.size)
             let boardSide = boardSide(in: proxy.size, usesSideTimers: usesSideTimers)
 
             ZStack {
@@ -35,17 +37,12 @@ struct PurePlayBoardView: View {
                         .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
 
                     VStack(spacing: 0) {
-                        timerCard(for: .white, isCompact: true, rotation: .degrees(180))
+                        compactPlayerStrip(for: .white, rotation: .degrees(180), stacksControls: usesStackedCompactControls)
                             .padding(.top, 14)
                         Spacer()
 
-                        HStack(alignment: .bottom, spacing: 12) {
-                            timerCard(for: .black, isCompact: true)
-                            Spacer(minLength: 12)
-                            horizontalControlDock
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 14)
+                        compactPlayerStrip(for: .black, stacksControls: usesStackedCompactControls)
+                            .padding(.bottom, 14)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -78,7 +75,12 @@ struct PurePlayBoardView: View {
     private func usesSideTimerLayout(in size: CGSize) -> Bool {
         let largestBoardSide = max(0, size.height - boardPadding * 2)
         let requiredWidth = largestBoardSide + timerPanelWidth * 2 + boardPadding * 4
-        return size.width >= requiredWidth
+        let requiredHeight = timerPanelWidth + controlDockLongSide + boardPadding * 3
+        return size.width >= requiredWidth && size.height >= requiredHeight
+    }
+
+    private func usesStackedCompactControlLayout(in size: CGSize) -> Bool {
+        size.width < 440
     }
 
     private func boardSide(in size: CGSize, usesSideTimers: Bool) -> CGFloat {
@@ -87,7 +89,9 @@ struct PurePlayBoardView: View {
             return max(0, min(size.height - boardPadding * 2, widthLimitedSide))
         }
 
-        return max(0, min(size.width, size.height) - boardPadding * 2)
+        let edgeReservedHeight: CGFloat = usesStackedCompactControlLayout(in: size) ? 150 : 84
+        let heightLimitedSide = size.height - edgeReservedHeight * 2
+        return max(0, min(size.width - boardPadding * 2, heightLimitedSide))
     }
 
     private func boardView(boardSide: CGFloat) -> some View {
@@ -107,24 +111,42 @@ struct PurePlayBoardView: View {
 
     private func sideTimerBoardLayout(boardSide: CGFloat) -> some View {
         HStack(spacing: boardPadding) {
-            VStack {
-                timerCard(for: .black, isCompact: false, rotation: .degrees(-90))
-                    .frame(width: timerPanelWidth, height: timerPanelWidth)
-                Spacer()
-            }
-            .frame(width: timerPanelWidth)
+            sidePlayerPanel(for: .black, rotation: .degrees(-90))
 
             boardView(boardSide: boardSide)
 
-            VStack {
-                timerCard(for: .white, isCompact: false, rotation: .degrees(90))
-                    .frame(width: timerPanelWidth, height: timerPanelWidth)
-                Spacer()
-                verticalControlDock
-            }
-            .frame(width: timerPanelWidth)
+            sidePlayerPanel(for: .white, rotation: .degrees(90))
         }
         .padding(boardPadding)
+    }
+
+    private func compactPlayerStrip(for stone: Stone, rotation: Angle = .zero, stacksControls: Bool) -> some View {
+        Group {
+            if stacksControls {
+                VStack(spacing: 8) {
+                    timerCard(for: stone, isCompact: true)
+                    horizontalControlDock()
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    timerCard(for: stone, isCompact: true)
+                    Spacer(minLength: 12)
+                    horizontalControlDock()
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .rotationEffect(rotation)
+    }
+
+    private func sidePlayerPanel(for stone: Stone, rotation: Angle) -> some View {
+        VStack(spacing: boardPadding) {
+            timerCard(for: stone, isCompact: false, rotation: rotation)
+                .frame(width: timerPanelWidth, height: timerPanelWidth)
+            Spacer(minLength: boardPadding)
+            sideControlDock(rotation: rotation)
+        }
+        .frame(width: timerPanelWidth)
     }
 
     private func timerCard(for stone: Stone, isCompact: Bool, rotation: Angle = .zero) -> some View {
@@ -137,28 +159,28 @@ struct PurePlayBoardView: View {
         .rotationEffect(rotation)
     }
 
-    private var horizontalControlDock: some View {
+    private func horizontalControlDock() -> some View {
         HStack(spacing: 12) {
-            currentPlayerMark
-            undoButton
-            passButton
-            resetButton
-            closeButton
+            controlItems
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    private var verticalControlDock: some View {
-        VStack(spacing: 12) {
-            currentPlayerMark
-            undoButton
-            passButton
-            resetButton
-            closeButton
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 14)
+    private func sideControlDock(rotation: Angle) -> some View {
+        horizontalControlDock()
+            .fixedSize()
+            .rotationEffect(rotation)
+            .frame(width: timerPanelWidth, height: controlDockLongSide)
+    }
+
+    @ViewBuilder
+    private var controlItems: some View {
+        currentPlayerMark
+        undoButton
+        passButton
+        resetButton
+        closeButton
     }
 
     private var currentPlayerMark: some View {

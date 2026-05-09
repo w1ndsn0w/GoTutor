@@ -66,7 +66,14 @@ final class GoGameViewModel: ObservableObject {
     @Published private(set) var consecutivePasses: Int = 0
     @Published private(set) var isGameOver: Bool = false
     
-    @Published private(set) var moves: [Move] = []
+    @Published private(set) var moves: [Move] = [] {
+        didSet {
+            if !isReviewMode {
+                reviewPlayback.reset()
+            }
+            refreshReviewPanelState()
+        }
+    }
     @Published private(set) var lastMove: Move? = nil
     @Published private(set) var lastIllegalReason: IllegalReason? = nil
     
@@ -147,11 +154,20 @@ final class GoGameViewModel: ObservableObject {
     
     @Published private(set) var currentAnalysis: TerritoryAnalysis? = nil
     @Published private(set) var deadStones: Set<Point> = []
-    @Published private(set) var moveAnalyses: [Int: MoveAnalysis] = [:]
+    @Published private(set) var moveAnalyses: [Int: MoveAnalysis] = [:] {
+        didSet {
+            reviewPlayback.updateAnalyses(moveAnalyses)
+            refreshReviewPanelState()
+        }
+    }
     
-    @Published var currentTurn: Int = 0
+    @Published var currentTurn: Int = 0 {
+        didSet { refreshReviewPanelState() }
+    }
     @Published var isReviewMode: Bool = false
-    @Published var analysisProgress: Double = 1.0
+    @Published var analysisProgress: Double = 1.0 {
+        didSet { refreshReviewPanelState() }
+    }
     @Published private(set) var isEngineReady: Bool = false
     @Published private(set) var engineStatusMessage: String? = nil
     @Published private(set) var isAIThinking: Bool = false
@@ -164,6 +180,8 @@ final class GoGameViewModel: ObservableObject {
     private var currentRecordTitle: String? = nil
     private var currentBlackPlayerName: String? = nil
     private var currentWhitePlayerName: String? = nil
+    private var reviewPlayback = ReviewPlaybackState()
+    private(set) var reviewPanelState: ReviewPanelState = .empty
     
     // 【核心】接入单例引擎
     private let aiEngine = KataGoWrapper.shared()
@@ -476,6 +494,8 @@ final class GoGameViewModel: ObservableObject {
         showRealTimeTerritory = false; isEndGameScoring = false; latestOwnership = nil; moveAnalyses = [:]
         currentTurn = 0; isReviewMode = false; analysisProgress = 1.0
         currentFileURL = nil; currentRecordDate = nil; currentRecordTitle = nil; currentBlackPlayerName = nil; currentWhitePlayerName = nil
+        reviewPlayback.reset()
+        reviewPanelState = .empty
         
         resetTutorUIForNewMove(isHuman: true)
         isAnalyzingTutor = false
@@ -535,16 +555,31 @@ final class GoGameViewModel: ObservableObject {
         currentWhitePlayerName = savedGame.whitePlayerName
         isReviewMode = true
         currentTurn = 0
+        reviewPlayback.configure(boardSize: savedGame.size, moves: savedGame.moves, analyses: savedGame.analyses)
+        refreshReviewPanelState()
     }
     
     func setTurn(_ turn: Int) {
+        let safeTurn = max(0, min(turn, moves.count))
+        guard safeTurn != currentTurn else { return }
+
         cancelPendingAIMove()
-        let safeTurn = max(0, min(turn, moves.count)); currentTurn = safeTurn; rebuildBoard(upTo: safeTurn)
+        currentTurn = safeTurn
+        if isReviewMode, let snapshot = reviewPlayback.snapshot(for: safeTurn) {
+            restoreReviewSnapshot(snapshot)
+        } else {
+            rebuildBoard(upTo: safeTurn)
+        }
         if let analysis = moveAnalyses[safeTurn], let own = analysis.ownership { self.latestOwnership = own; self.updateTerritory() } else { self.latestOwnership = nil; currentAnalysis = nil }
         
-        resetTutorUIForNewMove(isHuman: true)
-        executeBlunderCheck(forTurn: currentTurn)
+        if isTutorMode {
+            resetTutorUIForNewMove(isHuman: true)
+            executeBlunderCheck(forTurn: currentTurn)
+        } else if isAnalyzingTutor {
+            isAnalyzingTutor = false
+        }
         updateReviewHint()
+        refreshReviewPanelState()
     }
     
     private func rebuildBoard(upTo targetTurn: Int) {
@@ -560,6 +595,17 @@ final class GoGameViewModel: ObservableObject {
             currentPlayer = color.next; lastMove = move
         }
     }
+
+    private func restoreReviewSnapshot(_ snapshot: ReviewTurnSnapshot) {
+        board = snapshot.board
+        currentPlayer = snapshot.currentPlayer
+        capturesBlack = snapshot.capturesBlack
+        capturesWhite = snapshot.capturesWhite
+        consecutivePasses = snapshot.consecutivePasses
+        isGameOver = snapshot.isGameOver
+        lastMove = snapshot.lastMove
+        lastIllegalReason = nil
+    }
     
     func generateSaveData(title: String? = nil, blackPlayerName: String? = nil, whitePlayerName: String? = nil) -> SavedGame {
         return SavedGame(
@@ -574,11 +620,38 @@ final class GoGameViewModel: ObservableObject {
     }
 
     func teachingFeedback(for turn: Int) -> TeachingFeedback? {
-        TeachingFeedbackAnalyzer.feedback(for: turn, moves: moves, analyses: moveAnalyses, boardSize: size)
+        if isReviewMode {
+            return reviewPlayback.teachingFeedback(for: turn)
+        }
+
+        return TeachingFeedbackAnalyzer.feedback(for: turn, moves: moves, analyses: moveAnalyses, boardSize: size)
     }
 
     func keyTeachingFeedbacks(limit: Int = 6) -> [TeachingFeedback] {
-        TeachingFeedbackAnalyzer.keyFeedbacks(moves: moves, analyses: moveAnalyses, boardSize: size, limit: limit)
+        if isReviewMode {
+            return reviewPlayback.keyTeachingFeedbacks(limit: limit)
+        }
+
+        return TeachingFeedbackAnalyzer.keyFeedbacks(moves: moves, analyses: moveAnalyses, boardSize: size, limit: limit)
+    }
+
+    private func refreshReviewPanelState() {
+        if isReviewMode {
+            reviewPanelState = reviewPlayback.panelState(
+                currentTurn: currentTurn,
+                analysisProgress: analysisProgress
+            )
+            return
+        }
+
+        reviewPanelState = ReviewPanelState(
+            currentTurn: currentTurn,
+            boardSize: size,
+            analysisProgress: analysisProgress,
+            currentAnalysis: moveAnalyses[currentTurn],
+            currentFeedback: nil,
+            keyFeedbacks: []
+        )
     }
     
     private func pushSnapshot() {

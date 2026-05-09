@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ReviewTeachingPanel: View {
-    @ObservedObject var game: GoGameViewModel
+    let state: ReviewPanelState
     let phaseClassifier: GamePhaseClassifier
+    @Binding var showsTerritory: Bool
+    let onSelectTurn: (Int) -> Void
 
     var body: some View {
         ScrollView {
@@ -21,7 +23,7 @@ struct ReviewTeachingPanel: View {
     }
 
     private var currentGamePhase: some View {
-        let phase = phaseClassifier.phase(for: game.currentTurn)
+        let phase = phaseClassifier.phase(for: state.currentTurn)
         let span = phaseClassifier.span(for: phase)
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -63,8 +65,8 @@ struct ReviewTeachingPanel: View {
 
     private var analysisProgress: some View {
         VStack(spacing: 8) {
-            if game.analysisProgress < 1.0 {
-                ProgressView("高段 AI 正在批量分析...", value: game.analysisProgress, total: 1.0)
+            if state.analysisProgress < 1.0 {
+                ProgressView("高段 AI 正在批量分析...", value: state.analysisProgress, total: 1.0)
                     .progressViewStyle(.linear)
             } else {
                 Label("高段 AI 分析完毕", systemImage: "checkmark.circle.fill")
@@ -79,7 +81,7 @@ struct ReviewTeachingPanel: View {
 
     @ViewBuilder
     private var currentPositionEvaluation: some View {
-        if let analysis = game.moveAnalyses[game.currentTurn] {
+        if let analysis = state.currentAnalysis {
             let bWin = analysis.winrate * 100
             let wWin = 100.0 - bWin
             let lead = analysis.scoreLead
@@ -135,17 +137,17 @@ struct ReviewTeachingPanel: View {
 
     @ViewBuilder
     private var currentTeachingFeedback: some View {
-        if game.currentTurn == 0 {
+        if state.currentTurn == 0 {
             teachingPlaceholder("移动到某一步后，这里会解释本手的教学价值。")
-        } else if let feedback = game.teachingFeedback(for: game.currentTurn) {
-            TeachingFeedbackCard(feedback: feedback, boardSize: game.size)
+        } else if let feedback = state.currentFeedback {
+            TeachingFeedbackCard(feedback: feedback, boardSize: state.boardSize)
         } else {
             teachingPlaceholder("这一手还缺少前后局面分析，等待批量分析完成后会自动生成反馈。")
         }
     }
 
     private var keyMistakes: some View {
-        let feedbacks = game.keyTeachingFeedbacks()
+        let feedbacks = state.keyFeedbacks
         let groupedFeedbacks = Dictionary(grouping: feedbacks) { feedback in
             phaseClassifier.phase(for: feedback.turn)
         }
@@ -161,7 +163,7 @@ struct ReviewTeachingPanel: View {
             }
 
             if feedbacks.isEmpty {
-                Text(game.analysisProgress < 1.0 ? "分析完成后会列出最值得复盘的手。" : "目前没有明显失误手。")
+                Text(state.analysisProgress < 1.0 ? "分析完成后会列出最值得复盘的手。" : "目前没有明显失误手。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
@@ -182,7 +184,7 @@ struct ReviewTeachingPanel: View {
                             .foregroundStyle(phase.tint)
 
                             ForEach(phaseFeedbacks) { feedback in
-                                Button(action: { game.setTurn(feedback.turn) }) {
+                                Button(action: { onSelectTurn(feedback.turn) }) {
                                     HStack(spacing: 10) {
                                         Text("\(feedback.turn)")
                                             .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -214,7 +216,7 @@ struct ReviewTeachingPanel: View {
     }
 
     private var territoryToggle: some View {
-        Toggle("显示地盘归属", isOn: $game.showRealTimeTerritory)
+        Toggle("显示地盘归属", isOn: $showsTerritory)
             .toggleStyle(SwitchToggleStyle(tint: .blue))
             .padding()
             .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))

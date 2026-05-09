@@ -33,14 +33,12 @@ struct GoBoardWithCoordinatesView: View {
                     drawGrid(cellSize: cellSize, margin: margin)
                     if showStarPoints { drawStarPoints(cellSize: cellSize, margin: margin) }
                     drawStones(cellSize: cellSize, margin: margin)
+                    if let territory = territory { drawTerritory(territory: territory, cellSize: cellSize, margin: margin) }
                     if showAnalysisOverlays {
-                        drawTutorHint(cellSize: cellSize, margin: margin)
-                        drawReviewHint(cellSize: cellSize, margin: margin)
-                        drawCandidateMoves(cellSize: cellSize, margin: margin)
+                        drawAnalysisMarkers(cellSize: cellSize, margin: margin)
                     }
                     
                     if !game.isEndGameScoring && !isAITurn && showHoverGhost { drawHoverGhost(cellSize: cellSize, margin: margin) }
-                    if let territory = territory { drawTerritory(territory: territory, cellSize: cellSize, margin: margin) }
                 }
                 .frame(width: boardDimension, height: boardDimension)
                 .background(Color.white.opacity(0.001))
@@ -146,22 +144,100 @@ struct GoBoardWithCoordinatesView: View {
         }
     }
 
-    private func drawTutorHint(cellSize: CGFloat, margin: CGFloat) -> some View {
-        Group {
-            if game.isTutorMode, let bestPt = game.previousBestMove {
-                Circle().stroke(Color.blue, lineWidth: 3).frame(width: cellSize * 0.6, height: cellSize * 0.6).shadow(color: .blue.opacity(0.6), radius: 5)
-                    .position(x: margin + CGFloat(bestPt.c) * cellSize, y: margin + CGFloat(bestPt.r) * cellSize)
+    private func drawAnalysisMarkers(cellSize: CGFloat, margin: CGFloat) -> some View {
+        let markers = analysisMarkers
+
+        return ZStack {
+            ForEach(markers) { marker in
+                analysisMarker(marker, cellSize: cellSize)
+                    .position(x: margin + CGFloat(marker.point.c) * cellSize, y: margin + CGFloat(marker.point.r) * cellSize)
             }
         }
     }
-    private func drawReviewHint(cellSize: CGFloat, margin: CGFloat) -> some View {
-        Group {
-            if game.isReviewMode, let bestPt = game.reviewBestMoveHint {
-                Circle().stroke(Color.green, lineWidth: 3).frame(width: cellSize * 0.6, height: cellSize * 0.6).shadow(color: .green.opacity(0.6), radius: 5)
-                    .position(x: margin + CGFloat(bestPt.c) * cellSize, y: margin + CGFloat(bestPt.r) * cellSize)
+
+    private func analysisMarker(_ marker: BoardAnalysisMarker, cellSize: CGFloat) -> some View {
+        let diameter = marker.candidateOrder == nil ? cellSize * 0.5 : cellSize * 0.56
+        let fillColor = markerColor(marker)
+
+        return ZStack {
+            Circle()
+                .fill(fillColor.opacity(marker.isBestHint ? 0.92 : 0.78))
+                .overlay(
+                    Circle()
+                        .stroke(marker.isBestHint ? Color.white : Color.white.opacity(0.65), lineWidth: marker.isBestHint ? 2.2 : 1)
+                )
+
+            if let order = marker.candidateOrder {
+                Text("\(order)")
+                    .font(.system(size: cellSize * 0.34, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            } else {
+                Image(systemName: "scope")
+                    .font(.system(size: cellSize * 0.28, weight: .bold))
+                    .foregroundColor(.white)
             }
         }
+        .frame(width: diameter, height: diameter)
+        .overlay(alignment: .topTrailing) {
+            if marker.isBestHint, marker.candidateOrder != nil {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: diameter * 0.22, height: diameter * 0.22)
+                    .offset(x: diameter * 0.08, y: -diameter * 0.08)
+            }
+        }
+        .shadow(color: fillColor.opacity(marker.isBestHint ? 0.38 : 0.22), radius: marker.isBestHint ? 3 : 1.5)
     }
+
+    private var analysisMarkers: [BoardAnalysisMarker] {
+        guard game.isReviewMode || game.isTutorMode || game.shouldShowAICoachHints else { return [] }
+
+        let bestHint = currentBestHintPoint
+        var markersByPoint: [Point: BoardAnalysisMarker] = [:]
+
+        if let analysis = game.moveAnalyses[game.currentTurn] {
+            for candidate in analysis.candidateMoves.prefix(3) {
+                guard let point = Point(gtp: candidate.move, boardSize: game.size), isEmptyPoint(point) else { continue }
+                markersByPoint[point] = BoardAnalysisMarker(
+                    point: point,
+                    candidateOrder: candidate.order,
+                    isBestHint: point == bestHint
+                )
+            }
+        }
+
+        if let bestHint, isEmptyPoint(bestHint) {
+            if var existingMarker = markersByPoint[bestHint] {
+                existingMarker.isBestHint = true
+                markersByPoint[bestHint] = existingMarker
+            } else {
+                markersByPoint[bestHint] = BoardAnalysisMarker(point: bestHint, candidateOrder: nil, isBestHint: true)
+            }
+        }
+
+        return markersByPoint.values.sorted {
+            if $0.sortOrder == $1.sortOrder {
+                if $0.point.r == $1.point.r { return $0.point.c < $1.point.c }
+                return $0.point.r < $1.point.r
+            }
+            return $0.sortOrder < $1.sortOrder
+        }
+    }
+
+    private var currentBestHintPoint: Point? {
+        if game.isTutorMode {
+            return game.previousBestMove
+        }
+        if game.isReviewMode {
+            return game.reviewBestMoveHint
+        }
+        return nil
+    }
+
+    private func isEmptyPoint(_ point: Point) -> Bool {
+        point.isOnBoard(size: game.size) && game.board[point.r][point.c] == .empty
+    }
+
     private func drawTerritory(territory: TerritoryAnalysis, cellSize: CGFloat, margin: CGFloat) -> some View {
         let markerSize = cellSize * 0.18
         return ZStack {
@@ -192,42 +268,6 @@ struct GoBoardWithCoordinatesView: View {
             }
         }
     }
-    // ✅ 绘制数字 1、2、3 候选点
-    private func drawCandidateMoves(cellSize: CGFloat, margin: CGFloat) -> some View {
-        Group {
-            if (game.isReviewMode || game.isTutorMode || game.shouldShowAICoachHints), let analysis = game.moveAnalyses[game.currentTurn] {
-                ForEach(analysis.candidateMoves, id: \.order) { candidate in
-                    // 动态将 "D4" 这种字符串翻译成屏幕坐标
-                    if let pt = Point(gtp: candidate.move, boardSize: game.size),
-                       game.board[pt.r][pt.c] == .empty { // 确保该位置没有被棋子挡住
-                        
-                        ZStack {
-                            Circle()
-                                .fill(colorForOrder(candidate.order).opacity(0.85))
-                                .frame(width: cellSize * 0.55, height: cellSize * 0.55)
-                                .shadow(radius: 2)
-                            
-                            Text("\(candidate.order)")
-                                .font(.system(size: cellSize * 0.35, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                        }
-                        .position(x: margin + CGFloat(pt.c) * cellSize, y: margin + CGFloat(pt.r) * cellSize)
-                    }
-                }
-            }
-        }
-    }
-    
-    // 给不同名次的候选点不同的主色调 (1=蓝, 2=绿, 3=橙)
-    private func colorForOrder(_ order: Int) -> Color {
-        switch order {
-        case 1: return .blue
-        case 2: return .green
-        case 3: return .orange
-        default: return .gray
-        }
-    }
-
     private var boardLineColor: Color {
         if useWoodBackground { return Color.black.opacity(0.62) }
         return colorScheme == .dark ? Color.white.opacity(0.58) : Color.black.opacity(0.6)
@@ -238,6 +278,32 @@ struct GoBoardWithCoordinatesView: View {
         return colorScheme == .dark ? Color.white.opacity(0.68) : Color.black.opacity(0.6)
     }
 }
+
+private struct BoardAnalysisMarker: Identifiable {
+    let point: Point
+    var candidateOrder: Int?
+    var isBestHint: Bool
+
+    var id: Point { point }
+
+    var sortOrder: Int {
+        candidateOrder ?? 99
+    }
+}
+
+private func markerColor(_ marker: BoardAnalysisMarker) -> Color {
+    if marker.candidateOrder == nil {
+        return .blue
+    }
+
+    switch marker.candidateOrder {
+    case 1: return .blue
+    case 2: return .green
+    case 3: return .orange
+    default: return .gray
+    }
+}
+
 #Preview(){
     
 }

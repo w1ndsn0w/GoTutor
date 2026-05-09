@@ -64,6 +64,11 @@ struct GamePhaseClassifier: Sendable {
     let moves: [Move]
     let analyses: [Int: MoveAnalysis]
     let analysisProgress: Double
+    private let cachedIsAIRefined: Bool
+    private let cachedOpeningEndTurn: Int
+    private let cachedEndgameStartTurn: Int
+    private let cachedFinishedStartTurn: Int
+    private let cachedSpans: [GamePhaseSpan]
 
     init(
         totalMoves: Int,
@@ -77,10 +82,38 @@ struct GamePhaseClassifier: Sendable {
         self.moves = moves
         self.analyses = analyses
         self.analysisProgress = analysisProgress
+
+        let finishedStartTurn = Self.finishedStartTurn(totalMoves: totalMoves, moves: moves)
+        let isAIRefined = analysisProgress >= 1.0 && Self.analysisCoverage(totalMoves: totalMoves, analyses: analyses) >= 0.65
+        let openingEndTurn = Self.openingEndTurn(
+            totalMoves: totalMoves,
+            boardSize: boardSize,
+            analyses: analyses,
+            isAIRefined: isAIRefined
+        )
+        let endgameStartTurn = Self.endgameStartTurn(
+            totalMoves: totalMoves,
+            boardSize: boardSize,
+            analyses: analyses,
+            openingEndTurn: openingEndTurn,
+            finishedStartTurn: finishedStartTurn,
+            isAIRefined: isAIRefined
+        )
+
+        self.cachedIsAIRefined = isAIRefined
+        self.cachedOpeningEndTurn = openingEndTurn
+        self.cachedEndgameStartTurn = endgameStartTurn
+        self.cachedFinishedStartTurn = finishedStartTurn
+        self.cachedSpans = Self.makeSpans(
+            totalMoves: totalMoves,
+            openingEndTurn: openingEndTurn,
+            endgameStartTurn: endgameStartTurn,
+            finishedStartTurn: finishedStartTurn
+        )
     }
 
     var isAIRefined: Bool {
-        analysisProgress >= 1.0 && analysisCoverage >= 0.65
+        cachedIsAIRefined
     }
 
     var methodText: String {
@@ -88,14 +121,29 @@ struct GamePhaseClassifier: Sendable {
     }
 
     var spans: [GamePhaseSpan] {
+        cachedSpans
+    }
+
+    func phase(for turn: Int) -> GamePhase {
+        guard totalMoves > 0 else { return .opening }
+        if turn >= cachedFinishedStartTurn { return .finished }
+        if turn <= cachedOpeningEndTurn { return .opening }
+        if turn >= cachedEndgameStartTurn { return .endgame }
+        return .middleGame
+    }
+
+    func span(for phase: GamePhase) -> GamePhaseSpan? {
+        spans.first { $0.phase == phase }
+    }
+
+    private static func makeSpans(totalMoves: Int, openingEndTurn: Int, endgameStartTurn: Int, finishedStartTurn: Int) -> [GamePhaseSpan] {
         guard totalMoves > 0 else {
             return [GamePhaseSpan(phase: .opening, startTurn: 0, endTurn: 0)]
         }
 
-        let finishedStart = finishedStartTurn
-        let mainEnd = max(0, finishedStart - 1)
+        let mainEnd = max(0, finishedStartTurn - 1)
         guard mainEnd >= 1 else {
-            return [GamePhaseSpan(phase: .finished, startTurn: finishedStart, endTurn: totalMoves)]
+            return [GamePhaseSpan(phase: .finished, startTurn: finishedStartTurn, endTurn: totalMoves)]
         }
 
         let openingEnd = min(mainEnd, openingEndTurn)
@@ -116,20 +164,13 @@ struct GamePhaseClassifier: Sendable {
         return result
     }
 
-    func phase(for turn: Int) -> GamePhase {
-        guard totalMoves > 0 else { return .opening }
-        if turn >= finishedStartTurn { return .finished }
-        if turn <= openingEndTurn { return .opening }
-        if turn >= endgameStartTurn { return .endgame }
-        return .middleGame
-    }
-
-    func span(for phase: GamePhase) -> GamePhaseSpan? {
-        spans.first { $0.phase == phase }
-    }
-
-    private var openingEndTurn: Int {
-        if let aiOpeningEndTurn {
+    private static func openingEndTurn(
+        totalMoves: Int,
+        boardSize: Int,
+        analyses: [Int: MoveAnalysis],
+        isAIRefined: Bool
+    ) -> Int {
+        if let aiOpeningEndTurn = aiOpeningEndTurn(totalMoves: totalMoves, boardSize: boardSize, analyses: analyses, isAIRefined: isAIRefined) {
             return aiOpeningEndTurn
         }
 
@@ -138,8 +179,22 @@ struct GamePhaseClassifier: Sendable {
         return max(1, min(totalMoves, min(conventionalOpening, max(30, proportionalOpening))))
     }
 
-    private var endgameStartTurn: Int {
-        if let aiEndgameStartTurn {
+    private static func endgameStartTurn(
+        totalMoves: Int,
+        boardSize: Int,
+        analyses: [Int: MoveAnalysis],
+        openingEndTurn: Int,
+        finishedStartTurn: Int,
+        isAIRefined: Bool
+    ) -> Int {
+        if let aiEndgameStartTurn = aiEndgameStartTurn(
+            totalMoves: totalMoves,
+            boardSize: boardSize,
+            analyses: analyses,
+            openingEndTurn: openingEndTurn,
+            finishedStartTurn: finishedStartTurn,
+            isAIRefined: isAIRefined
+        ) {
             return aiEndgameStartTurn
         }
 
@@ -149,7 +204,7 @@ struct GamePhaseClassifier: Sendable {
         return max(openingEndTurn + 1, min(totalMoves, min(conventionalEndgame, max(proportionalEndgame, totalMoves - 60))))
     }
 
-    private var finishedStartTurn: Int {
+    private static func finishedStartTurn(totalMoves: Int, moves: [Move]) -> Int {
         guard totalMoves > 0 else { return 0 }
         if totalMoves >= 2,
            moves.indices.contains(totalMoves - 2),
@@ -161,13 +216,18 @@ struct GamePhaseClassifier: Sendable {
         return totalMoves
     }
 
-    private var analysisCoverage: Double {
+    private static func analysisCoverage(totalMoves: Int, analyses: [Int: MoveAnalysis]) -> Double {
         guard totalMoves > 0 else { return 0 }
         let analyzedTurns = (0...totalMoves).filter { analyses[$0] != nil }.count
         return min(1.0, Double(analyzedTurns) / Double(totalMoves + 1))
     }
 
-    private var aiOpeningEndTurn: Int? {
+    private static func aiOpeningEndTurn(
+        totalMoves: Int,
+        boardSize: Int,
+        analyses: [Int: MoveAnalysis],
+        isAIRefined: Bool
+    ) -> Int? {
         guard isAIRefined, totalMoves >= 40 else { return nil }
 
         let minimumOpening = boardSize >= 19 ? 30 : max(10, boardSize + 2)
@@ -175,7 +235,7 @@ struct GamePhaseClassifier: Sendable {
         guard minimumOpening < maximumOpening else { return nil }
 
         for turn in minimumOpening...maximumOpening {
-            let metrics = windowMetrics(start: turn, length: 10)
+            let metrics = windowMetrics(start: turn, length: 10, totalMoves: totalMoves, analyses: analyses)
             if metrics.scoreSwing >= 0.75 || metrics.winrateSwing >= 0.028 {
                 return max(1, min(totalMoves, turn - 1))
             }
@@ -184,7 +244,14 @@ struct GamePhaseClassifier: Sendable {
         return nil
     }
 
-    private var aiEndgameStartTurn: Int? {
+    private static func aiEndgameStartTurn(
+        totalMoves: Int,
+        boardSize: Int,
+        analyses: [Int: MoveAnalysis],
+        openingEndTurn: Int,
+        finishedStartTurn: Int,
+        isAIRefined: Bool
+    ) -> Int? {
         guard isAIRefined, totalMoves >= 80 else { return nil }
 
         let earliest = max(openingEndTurn + 24, Int(Double(totalMoves) * 0.58))
@@ -192,7 +259,7 @@ struct GamePhaseClassifier: Sendable {
         guard earliest <= latest else { return nil }
 
         for turn in earliest...latest {
-            let metrics = windowMetrics(start: turn, length: 14)
+            let metrics = windowMetrics(start: turn, length: 14, totalMoves: totalMoves, analyses: analyses)
             let isTerritoryStable = metrics.ownershipCertainty >= 0.60
             let isScoreSettled = metrics.scoreSwing <= 0.55 && metrics.winrateSwing <= 0.018
 
@@ -204,7 +271,7 @@ struct GamePhaseClassifier: Sendable {
         return nil
     }
 
-    private func windowMetrics(start: Int, length: Int) -> PhaseWindowMetrics {
+    private static func windowMetrics(start: Int, length: Int, totalMoves: Int, analyses: [Int: MoveAnalysis]) -> PhaseWindowMetrics {
         let end = min(totalMoves, start + length)
         guard start < end else { return PhaseWindowMetrics(scoreSwing: 0, winrateSwing: 0, ownershipCertainty: 0) }
 

@@ -6,16 +6,7 @@ struct ReviewView: View {
     
     // 复盘页面拥有一个独立的“大脑”
     @StateObject private var game = GoGameViewModel()
-
-    private var phaseClassifier: GamePhaseClassifier {
-        GamePhaseClassifier(
-            totalMoves: game.moves.count,
-            boardSize: game.size,
-            moves: game.moves,
-            analyses: game.moveAnalyses,
-            analysisProgress: game.analysisProgress
-        )
-    }
+    @State private var phaseClassifier = GamePhaseClassifier(totalMoves: 0, boardSize: 19)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,49 +52,187 @@ struct ReviewView: View {
                         
                         Spacer()
                         
-                        // 底部控制台：Slider 和 按钮完美移植
-                        VStack(spacing: 12) {
-                            ReviewPhaseTimeline(classifier: phaseClassifier, currentTurn: game.currentTurn)
-                                .padding(.horizontal, 40)
-
-                            HStack {
-                                Text("0").font(.caption).foregroundStyle(.secondary)
-                                Slider(
-                                    value: Binding(
-                                        get: { Double(game.currentTurn) },
-                                        set: { game.setTurn(Int($0)) }
-                                    ),
-                                    in: 0...Double(max(1, game.moves.count)),
-                                    step: 1
-                                )
-                                Text("\(game.moves.count)").font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 40)
-                            
-                            HStack(spacing: 30) {
-                                Button(action: { game.setTurn(0) }) { Image(systemName: "backward.end.fill").font(.title2) }.buttonStyle(.plain)
-                                Button(action: { game.setTurn(max(0, game.currentTurn - 1)) }) { Image(systemName: "chevron.left.circle.fill").font(.largeTitle) }.buttonStyle(.plain).disabled(game.currentTurn == 0)
-                                
-                                Text("第 \(game.currentTurn) 手")
-                                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                                    .frame(width: 100)
-                                
-                                Button(action: { game.setTurn(min(game.moves.count, game.currentTurn + 1)) }) { Image(systemName: "chevron.right.circle.fill").font(.largeTitle) }.buttonStyle(.plain).disabled(game.currentTurn == game.moves.count)
-                                Button(action: { game.setTurn(game.moves.count) }) { Image(systemName: "forward.end.fill").font(.title2) }.buttonStyle(.plain)
-                            }
-                        }
+                        ReviewPlaybackControls(
+                            currentTurn: game.currentTurn,
+                            totalMoves: game.moves.count,
+                            phaseClassifier: phaseClassifier,
+                            onSetTurn: { game.setTurn($0) }
+                        )
                         .padding(.bottom, 20)
                     }
                 }
                 
                 Divider()
                 
-                ReviewTeachingPanel(game: game, phaseClassifier: phaseClassifier)
+                ReviewTeachingPanel(
+                    state: game.reviewPanelState,
+                    phaseClassifier: phaseClassifier,
+                    showsTerritory: $game.showRealTimeTerritory,
+                    onSelectTurn: { game.setTurn($0) }
+                )
             }
         }
         .onAppear {
             game.loadGame(from: fileURL)
+            refreshPhaseClassifier()
         }
+        .onChange(of: game.analysisProgress) { _, _ in
+            refreshPhaseClassifier()
+        }
+    }
+
+    private func refreshPhaseClassifier() {
+        phaseClassifier = GamePhaseClassifier(
+            totalMoves: game.moves.count,
+            boardSize: game.size,
+            moves: game.moves,
+            analyses: game.moveAnalyses,
+            analysisProgress: game.analysisProgress
+        )
+    }
+}
+
+private struct ReviewPlaybackControls: View {
+    let currentTurn: Int
+    let totalMoves: Int
+    let phaseClassifier: GamePhaseClassifier
+    let onSetTurn: (Int) -> Void
+
+    @State private var sliderValue: Double = 0
+    @State private var isScrubbing = false
+    @State private var previewStrategy = ReviewScrubPreviewStrategy()
+
+    private var displayedTurn: Int {
+        if isScrubbing {
+            return clampedTurn(Int(sliderValue.rounded()))
+        }
+        return currentTurn
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ReviewPhaseTimeline(classifier: phaseClassifier, currentTurn: displayedTurn)
+                .padding(.horizontal, 40)
+
+            HStack {
+                Text("0").font(.caption).foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { isScrubbing ? sliderValue : Double(currentTurn) },
+                        set: { newValue in
+                            let safeTurn = clampedTurn(Int(newValue.rounded()))
+                            sliderValue = Double(safeTurn)
+                            if isScrubbing {
+                                previewTurn(safeTurn)
+                            } else {
+                                commitTurn(safeTurn)
+                            }
+                        }
+                    ),
+                    in: 0...Double(max(1, totalMoves)),
+                    step: 1,
+                    onEditingChanged: handleScrubbingChanged
+                )
+                Text("\(totalMoves)").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 40)
+
+            HStack(spacing: 30) {
+                Button(action: { commitTurn(0) }) {
+                    Image(systemName: "backward.end.fill").font(.title2)
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { commitTurn(max(0, currentTurn - 1)) }) {
+                    Image(systemName: "chevron.left.circle.fill").font(.largeTitle)
+                }
+                .buttonStyle(.plain)
+                .disabled(currentTurn == 0)
+
+                Text("第 \(displayedTurn) 手")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .frame(width: 100)
+
+                Button(action: { commitTurn(min(totalMoves, currentTurn + 1)) }) {
+                    Image(systemName: "chevron.right.circle.fill").font(.largeTitle)
+                }
+                .buttonStyle(.plain)
+                .disabled(currentTurn == totalMoves)
+
+                Button(action: { commitTurn(totalMoves) }) {
+                    Image(systemName: "forward.end.fill").font(.title2)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .onAppear {
+            sliderValue = Double(currentTurn)
+        }
+        .onChange(of: currentTurn) { _, newValue in
+            if !isScrubbing {
+                sliderValue = Double(newValue)
+            }
+        }
+    }
+
+    private func handleScrubbingChanged(_ editing: Bool) {
+        if editing {
+            isScrubbing = true
+            sliderValue = Double(currentTurn)
+            previewStrategy.reset(startingAt: currentTurn)
+            return
+        }
+
+        isScrubbing = false
+        previewStrategy.reset()
+        commitTurn(clampedTurn(Int(sliderValue.rounded())))
+    }
+
+    private func previewTurn(_ turn: Int) {
+        guard previewStrategy.shouldPreview(turn: turn, totalMoves: totalMoves) else { return }
+        onSetTurn(turn)
+    }
+
+    private func commitTurn(_ turn: Int) {
+        let safeTurn = clampedTurn(turn)
+        sliderValue = Double(safeTurn)
+        previewStrategy.reset(startingAt: safeTurn)
+        onSetTurn(safeTurn)
+    }
+
+    private func clampedTurn(_ turn: Int) -> Int {
+        max(0, min(turn, totalMoves))
+    }
+}
+
+private struct ReviewScrubPreviewStrategy {
+    private let minimumInterval: TimeInterval
+    private var lastPreviewDate: Date = .distantPast
+    private var lastPreviewTurn: Int?
+
+    init(minimumInterval: TimeInterval = 0.08) {
+        self.minimumInterval = minimumInterval
+    }
+
+    mutating func shouldPreview(turn: Int, totalMoves: Int, now: Date = Date()) -> Bool {
+        guard turn != lastPreviewTurn else { return false }
+
+        if turn == 0 || turn == totalMoves || now.timeIntervalSince(lastPreviewDate) >= minimumInterval {
+            recordPreview(turn: turn, date: now)
+            return true
+        }
+
+        return false
+    }
+
+    mutating func reset(startingAt turn: Int? = nil) {
+        lastPreviewDate = .distantPast
+        lastPreviewTurn = turn
+    }
+
+    private mutating func recordPreview(turn: Int, date: Date) {
+        lastPreviewTurn = turn
+        lastPreviewDate = date
     }
 }
 
