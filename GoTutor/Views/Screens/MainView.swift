@@ -187,20 +187,9 @@ struct GameScreen: View {
             Spacer()
 
             HStack(spacing: 12) {
-                fileTrainingGroup
+                resourcesMenu
 
-                Divider().frame(height: 16)
-
-                battleModeGroup
-
-                Divider().frame(height: 16)
-
-                Button(action: { presentPurePlayMode() }) {
-                    Label("纯对弈", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .buttonStyle(HeaderButtonStyle())
-
-                Divider().frame(height: 16)
+                playModeMenu
 
                 assistMenu
 
@@ -209,13 +198,19 @@ struct GameScreen: View {
             }
             .frame(minWidth: 0, alignment: .trailing)
         }
+        .controlSize(.regular)
     }
 
     private var gameInfoGroup: some View {
         HStack(spacing: 12) {
-            Text("围棋")
-                .font(.system(size: 22, weight: .semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("GoTutor")
+                    .font(.system(size: 22, weight: .semibold))
+                    .lineLimit(1)
+                Text("\(size) 路棋盘")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Picker("", selection: Binding(get: { size }, set: { onRequestChangeSize($0) })) {
                 Text("9路").tag(9); Text("13路").tag(13); Text("19路").tag(19)
@@ -228,14 +223,29 @@ struct GameScreen: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var fileTrainingGroup: some View {
-        HStack(spacing: 8) {
-            Button(action: { showRecordLibrary = true }) { Label("棋谱", systemImage: "books.vertical") }
-            Button(action: { showFileImporter = true }) { Label("读谱", systemImage: "folder") }
-            Button(action: {
-                prepareSaveSheet()
-            }) { Label("保存", systemImage: "square.and.arrow.down") }
-            Button(action: { showTsumegoSheet = true }) { Label("死活题", systemImage: "scope") }
+    private var resourcesMenu: some View {
+        Menu {
+            Section("棋谱") {
+                Button(action: { showRecordLibrary = true }) {
+                    Label("棋谱库", systemImage: "books.vertical")
+                }
+
+                Button(action: { showFileImporter = true }) {
+                    Label("导入棋谱", systemImage: "folder")
+                }
+
+                Button(action: { prepareSaveSheet() }) {
+                    Label("保存当前对局", systemImage: "square.and.arrow.down")
+                }
+            }
+
+            Section("训练") {
+                Button(action: { showTsumegoSheet = true }) {
+                    Label("死活题训练", systemImage: "scope")
+                }
+            }
+        } label: {
+            Label("资料与训练", systemImage: "tray.full")
         }
         .buttonStyle(HeaderButtonStyle())
     }
@@ -296,44 +306,49 @@ struct GameScreen: View {
         showPurePlayMode = true
     }
 
-    private var battleModeGroup: some View {
-        HStack(spacing: 8) {
-            Toggle("AI陪练", isOn: $game.isAIBattleMode)
+    private var playModeMenu: some View {
+        Menu {
+            Section("对局") {
+                Toggle("AI 陪练", isOn: $game.isAIBattleMode)
+
+                Button(action: { presentPurePlayMode() }) {
+                    Label("进入纯对弈模式", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+            }
 
             if game.isAIBattleMode {
-                Picker("", selection: $game.aiPlayerColor) {
-                    Text("执白").tag(Stone.white)
-                    Text("执黑").tag(Stone.black)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 104)
+                Section("AI 设置") {
+                    Picker("AI 执棋", selection: $game.aiPlayerColor) {
+                        Text("AI 执白").tag(Stone.white)
+                        Text("AI 执黑").tag(Stone.black)
+                    }
 
-                Menu {
-                    Picker("AI难度", selection: $game.aiDifficulty) {
+                    Picker("AI 难度", selection: $game.aiDifficulty) {
                         ForEach(AIBattleDifficulty.allCases) { difficulty in
                             Text(difficulty.title).tag(difficulty)
                         }
                     }
-                } label: {
-                    Label(game.aiDifficulty.title, systemImage: "dial.low")
-                }
-                .buttonStyle(HeaderButtonStyle())
-                .frame(minWidth: 118)
 
-                Toggle("提示", isOn: $game.isAICoachHintEnabled)
-                    .toggleStyle(CleanWhiteToggleStyle())
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                    Toggle("人类落子提示", isOn: $game.isAICoachHintEnabled)
+                }
             }
+        } label: {
+            Label(playModeTitle, systemImage: game.isAIBattleMode ? "sparkles" : "person.2")
         }
-        .toggleStyle(CleanWhiteToggleStyle())
-        .animation(.easeInOut(duration: 0.2), value: game.isAIBattleMode)
+        .buttonStyle(HeaderButtonStyle())
+    }
+
+    private var playModeTitle: String {
+        game.isAIBattleMode ? "AI 陪练" : "本地对局"
     }
 
     private var assistMenu: some View {
         Menu {
-            Toggle("导师点评", isOn: $game.isTutorMode)
-            Toggle("实时形势", isOn: $game.showRealTimeTerritory)
-            Toggle("终局结算", isOn: $game.isEndGameScoring)
+            Section("分析") {
+                Toggle("导师点评", isOn: $game.isTutorMode)
+                Toggle("实时形势", isOn: $game.showRealTimeTerritory)
+                Toggle("终局结算", isOn: $game.isEndGameScoring)
+            }
         } label: {
             Label("辅助", systemImage: "slider.horizontal.3")
         }

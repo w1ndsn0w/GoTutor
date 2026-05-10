@@ -10,24 +10,7 @@ struct ReviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // ====================
-            // 顶栏
-            // ====================
-            HStack {
-                Button(action: { dismiss() }) {
-                    Label("退出复盘", systemImage: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundColor(.gray)
-                }
-                Spacer()
-                Text("复盘模式 - \(fileURL.lastPathComponent)")
-                    .font(.headline)
-                Spacer()
-                // 占位保持居中
-                Color.clear.frame(width: 100, height: 1)
-            }
-            .padding()
-            .background(.regularMaterial)
+            headerBar
             
             Divider()
 
@@ -79,6 +62,58 @@ struct ReviewView: View {
         .onChange(of: game.analysisProgress) { _, _ in
             refreshPhaseClassifier()
         }
+    }
+
+    private var headerBar: some View {
+        HStack(spacing: 16) {
+            Button(action: { dismiss() }) {
+                Label("完成", systemImage: "xmark")
+            }
+            .buttonStyle(HeaderButtonStyle())
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                Text("复盘")
+                    .font(.headline)
+                Text(fileURL.deletingPathExtension().lastPathComponent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            reviewProgressPill
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+    }
+
+    private var reviewProgressPill: some View {
+        HStack(spacing: 7) {
+            if game.analysisProgress < 1.0 {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 12, height: 12)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+
+            Text(reviewProgressText)
+                .font(.system(size: 13, weight: .medium))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(UIColor.tertiarySystemGroupedBackground), in: Capsule())
+    }
+
+    private var reviewProgressText: String {
+        if game.analysisProgress >= 1.0 { return "分析完成" }
+        return "\(Int(game.analysisProgress * 100))%"
     }
 
     private func refreshPhaseClassifier() {

@@ -4,54 +4,80 @@ struct SidePanelContent: View {
     @ObservedObject var game: GoGameViewModel
 
     var body: some View {
-        VStack(spacing: 20) {
-            engineStatusSection
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 14) {
+                    gameSummarySection
+                    engineStatusSection
+                    prisonerSection
 
-            prisonerSection
+                    if game.isTutorMode {
+                        tutorSection
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+
+                    if (game.showRealTimeTerritory || game.isEndGameScoring), let analysis = game.currentAnalysis {
+                        ScoreOverlayCard(territory: analysis, capturesBlack: game.capturesBlack, capturesWhite: game.capturesWhite)
+                            .frame(maxWidth: .infinity)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .padding(16)
+            }
 
             Divider()
 
-            if game.isTutorMode {
-                tutorSection
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-
-            if (game.showRealTimeTerritory || game.isEndGameScoring), let analysis = game.currentAnalysis {
-                ScoreOverlayCard(territory: analysis, capturesBlack: game.capturesBlack, capturesWhite: game.capturesWhite)
-                    .background(Color.clear)
-                    .shadow(radius: 0)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            Spacer()
-
             controlsSection
+                .padding(16)
+
             statusMessage
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
         }
-        .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(UIColor.systemGroupedBackground))
     }
 
     private var prisonerSection: some View {
-        VStack(spacing: 12) {
-            Text("提子信息 (Prisoners)")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Divider()
+        InspectorPanel(title: "提子", systemImage: "circle.grid.2x2") {
             HStack {
                 PrisonerPill(isBlack: true, count: game.capturesBlack)
                 Spacer()
                 PrisonerPill(isBlack: false, count: game.capturesWhite)
             }
         }
-        .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var gameSummarySection: some View {
+        InspectorPanel(title: "棋局", systemImage: "checkerboard.rectangle") {
+            VStack(spacing: 10) {
+                InspectorInfoRow(title: "模式", value: modeText, systemImage: "person.2")
+                InspectorInfoRow(title: "当前", value: currentPlayerText, systemImage: "circle.lefthalf.filled")
+                InspectorInfoRow(title: "手数", value: "\(game.moves.count)", systemImage: "number")
+
+                if game.isAIBattleMode {
+                    InspectorInfoRow(title: "AI 难度", value: game.aiDifficulty.title, systemImage: "dial.low")
+                    InspectorInfoRow(title: "AI 执棋", value: game.aiPlayerColor == .black ? "黑棋" : "白棋", systemImage: "sparkles")
+                }
+            }
+        }
+    }
+
+    private var modeText: String {
+        game.isAIBattleMode ? "AI 陪练" : "本地对局"
+    }
+
+    private var currentPlayerText: String {
+        if game.isGameOver { return "已结束" }
+        if game.isAIThinking { return "AI 思考中" }
+        if game.isHintThinking { return "计算候选点" }
+        return game.currentPlayer == .black ? "黑方落子" : "白方落子"
     }
 
     @ViewBuilder
     private var engineStatusSection: some View {
         if (!game.isEngineReady && game.engineStatusMessage != nil) || game.isAIThinking || game.isHintThinking || game.analysisProgress < 1.0 {
-            VStack(alignment: .leading, spacing: 8) {
+            InspectorPanel(title: "引擎", systemImage: "cpu") {
                 HStack(spacing: 8) {
                     if game.isAIThinking || game.isHintThinking || game.analysisProgress < 1.0 {
                         ProgressView()
@@ -63,6 +89,7 @@ struct SidePanelContent: View {
 
                     Text(engineStatusTitle)
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
                 }
 
                 if let message = game.engineStatusMessage, !game.isEngineReady {
@@ -71,9 +98,6 @@ struct SidePanelContent: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -87,12 +111,11 @@ struct SidePanelContent: View {
     private var tutorSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("DeepSeek 导师点评")
-                    .font(.system(size: 13, weight: .bold))
+                Label("导师点评", systemImage: "graduationcap")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.blue)
                 Spacer()
             }
-            Divider()
 
             if let msg = game.blunderMessage {
                 tutorFeedback(message: msg)
@@ -104,8 +127,8 @@ struct SidePanelContent: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.blue.opacity(0.3), lineWidth: 1))
+        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.24), lineWidth: 1))
         .animation(.easeInOut(duration: 0.2), value: game.blunderMessage)
     }
 
@@ -150,6 +173,9 @@ struct SidePanelContent: View {
             Button(action: { game.reset() }) { Label("重新开始", systemImage: "arrow.counterclockwise") }
         }
         .buttonStyle(CleanWhiteButtonStyle())
+        .padding(12)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
     }
 
     @ViewBuilder

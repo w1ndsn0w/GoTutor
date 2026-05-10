@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    // iPad 专属：用来关闭当前弹窗的环境变量
     @Environment(\.dismiss) var dismiss
     
     @AppStorage("showCoordinates") private var showCoordinates: Bool = true
@@ -11,28 +10,43 @@ struct SettingsView: View {
     @AppStorage("useWoodBackground") private var useWoodBackground: Bool = true
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
-                Section(header: Text("棋盘显示")) {
-                    Toggle("显示坐标", isOn: $showCoordinates)
-                    Toggle("显示星位", isOn: $showStarPoints)
-                    Toggle("显示落子高亮", isOn: $showLastMoveMark)
-                    Toggle("显示悬停落子点 (需 Apple Pencil)", isOn: $showHoverGhost)
+                Section("棋盘显示") {
+                    Toggle(isOn: $showCoordinates) {
+                        Label("显示坐标", systemImage: "number")
+                    }
+
+                    Toggle(isOn: $showStarPoints) {
+                        Label("显示星位", systemImage: "sparkle")
+                    }
+
+                    Toggle(isOn: $showLastMoveMark) {
+                        Label("显示落子高亮", systemImage: "smallcircle.filled.circle")
+                    }
+
+                    Toggle(isOn: $showHoverGhost) {
+                        Label("显示悬停落子点", systemImage: "pencil.tip")
+                    }
                 }
                 
-                Section(header: Text("外观与材质")) {
-                    Toggle("使用实木纹理背景", isOn: $useWoodBackground)
+                Section("外观与材质") {
+                    Toggle(isOn: $useWoodBackground) {
+                        Label("实木纹理棋盘", systemImage: "square.split.diagonal")
+                    }
                 }
             }
-            .navigationTitle("偏好设置")
+            .formStyle(.grouped)
+            .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .font(.body.bold())
+                    Button("完成") {
+                        dismiss()
+                    }
+                    .font(.body.weight(.semibold))
                 }
             }
         }
-        // 在 iPad 上，Form 会自动呈现出非常漂亮的分组卡片样式
     }
 }

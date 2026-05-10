@@ -16,7 +16,7 @@ struct PrisonerPill: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(UIColor.secondarySystemGroupedBackground), in: Capsule())
+        .background(Color(UIColor.tertiarySystemGroupedBackground), in: Capsule())
         .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
@@ -57,8 +57,8 @@ struct ScoreOverlayCard: View {
         }
         .padding(14)
         .frame(width: 260)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        .background(Color(UIColor.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.16), lineWidth: 1))
     }
 }
 
@@ -68,11 +68,11 @@ struct CleanWhiteButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color(UIColor.secondarySystemGroupedBackground).opacity(isEnabled ? 1.0 : 0.6))
-            .foregroundColor(isEnabled ? .primary : .secondary.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .shadow(color: .black.opacity(isEnabled ? 0.08 : 0.0), radius: 2, y: 1)
+            .font(.system(size: 15, weight: .semibold))
+            .padding(.vertical, 11)
+            .background(Color(UIColor.tertiarySystemGroupedBackground).opacity(isEnabled ? 1.0 : 0.55))
+            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             .opacity(configuration.isPressed ? 0.7 : 1.0)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
     }
@@ -86,12 +86,12 @@ struct HeaderButtonStyle: ButtonStyle {
             .font(.system(size: 14, weight: .medium))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(UIColor.secondarySystemGroupedBackground).opacity(isEnabled ? 1.0 : 0.6))
-            .foregroundColor(isEnabled ? .primary : .secondary.opacity(0.5))
+            .background(Color(UIColor.tertiarySystemGroupedBackground).opacity(isEnabled ? 1.0 : 0.55))
+            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.55))
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(isEnabled ? 0.06 : 0.0), radius: 1, y: 1)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.14), lineWidth: 1))
             .opacity(configuration.isPressed ? 0.7 : 1.0)
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
     }
@@ -106,12 +106,66 @@ struct CleanWhiteToggleStyle: ToggleStyle {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(Color(UIColor.secondarySystemGroupedBackground).opacity(configuration.isOn ? 1.0 : 0.6))
-                .foregroundColor(configuration.isOn ? .accentColor : .primary.opacity(0.8))
+                .background(Color(UIColor.tertiarySystemGroupedBackground).opacity(configuration.isOn ? 1.0 : 0.55))
+                .foregroundStyle(configuration.isOn ? Color.accentColor : Color.primary.opacity(0.8))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .shadow(color: .black.opacity(configuration.isOn ? 0.06 : 0.0), radius: 1, y: 1)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.14), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .scaleEffect(configuration.isOn ? 1.0 : 0.97)
+    }
+}
+
+struct InspectorPanel<Content: View>: View {
+    let title: String
+    let systemImage: String
+    private let content: Content
+
+    init(title: String, systemImage: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            content
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
+    }
+}
+
+struct InspectorInfoRow: View {
+    let title: String
+    let value: String
+    var systemImage: String? = nil
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+            }
+
+            Text(title)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+        }
     }
 }
