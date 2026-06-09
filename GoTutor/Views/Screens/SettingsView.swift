@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
+
+    var onOpenTutorial: (() -> Void)? = nil
     
     @AppStorage("showCoordinates") private var showCoordinates: Bool = true
     @AppStorage("showStarPoints") private var showStarPoints: Bool = true
@@ -33,6 +35,14 @@ struct SettingsView: View {
                 Section("外观与材质") {
                     Toggle(isOn: $useWoodBackground) {
                         Label("实木纹理棋盘", systemImage: "square.split.diagonal")
+                    }
+                }
+
+                if let onOpenTutorial {
+                    Section("学习") {
+                        Button(action: onOpenTutorial) {
+                            Label("新手村", systemImage: "graduationcap")
+                        }
                     }
                 }
             }

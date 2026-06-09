@@ -8,12 +8,16 @@ struct MainView: View {
     @State private var showSizeChangeAlert: Bool = false
     @State private var isBoardEmpty: Bool = true
     @State private var showSettings = false
+    @State private var activeTutorial: TutorialPresentation?
+    @State private var showTsumegoFromTutorial = false
+    @State private var hasPresentedInitialTutorialThisSession = false
 
     @AppStorage("showCoordinates") private var showCoordinates: Bool = true
     @AppStorage("showStarPoints") private var showStarPoints: Bool = true
     @AppStorage("showHoverGhost") private var showHoverGhost: Bool = true
     @AppStorage("showLastMoveMark") private var showLastMoveMark: Bool = true
     @AppStorage("useWoodBackground") private var useWoodBackground: Bool = true
+    @AppStorage("hasHandledTutorialVillageOnboarding") private var hasHandledTutorialVillageOnboarding: Bool = false
 
     // iPad 横屏，高度通常在 700-800 左右，自动缩放
     private var boardPixelSize: CGFloat {
@@ -29,6 +33,7 @@ struct MainView: View {
             showHoverGhost: showHoverGhost, showLastMoveMark: showLastMoveMark,
             useWoodBackground: useWoodBackground,
             onOpenSettings: { showSettings = true },
+            onOpenTutorial: { presentTutorial(source: .manual) },
             onUpdateBoardEmptyState: { empty in isBoardEmpty = empty },
             onRequestChangeSize: { newSize in
                 guard newSize != boardSizeOption else { return }
@@ -42,12 +47,63 @@ struct MainView: View {
             Button("切换并重开", role: .destructive) { if let s = pendingBoardSize { boardSizeOption = s }; pendingBoardSize = nil }
         } message: { Text("当前棋局将被清空，是否继续？") }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView {
+                showSettings = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    presentTutorial(source: .manual)
+                }
+            }
         }
+        .fullScreenCover(item: $activeTutorial) { presentation in
+            TutorialVillageView(
+                isFirstLaunch: presentation.source == .firstLaunch,
+                onSkip: {
+                    if presentation.source == .firstLaunch {
+                        hasHandledTutorialVillageOnboarding = true
+                    }
+                    activeTutorial = nil
+                },
+                onCompleted: {
+                    hasHandledTutorialVillageOnboarding = true
+                },
+                onStartGame: {
+                    activeTutorial = nil
+                },
+                onOpenTsumego: {
+                    activeTutorial = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showTsumegoFromTutorial = true
+                    }
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showTsumegoFromTutorial) {
+            TsumegoListView(showsCloseButton: true)
+        }
+        .onAppear {
+            if !hasHandledTutorialVillageOnboarding && !hasPresentedInitialTutorialThisSession && activeTutorial == nil {
+                hasPresentedInitialTutorialThisSession = true
+                presentTutorial(source: .firstLaunch)
+            }
+        }
+    }
+
+    private func presentTutorial(source: TutorialPresentation.Source) {
+        activeTutorial = TutorialPresentation(source: source)
     }
 }
 
 // MARK: - GameScreen (主控页面)
+private struct TutorialPresentation: Identifiable {
+    enum Source {
+        case firstLaunch
+        case manual
+    }
+
+    let id = UUID()
+    let source: Source
+}
+
 private struct ReviewPresentation: Identifiable {
     let id = UUID()
     let url: URL
@@ -57,7 +113,7 @@ private struct ReviewPresentation: Identifiable {
 struct GameScreen: View {
     let size: Int; let boardPixelSize: CGFloat
     let showCoordinates: Bool; let showStarPoints: Bool; let showHoverGhost: Bool; let showLastMoveMark: Bool; let useWoodBackground: Bool
-    let onOpenSettings: () -> Void; let onUpdateBoardEmptyState: (Bool) -> Void; let onRequestChangeSize: (Int) -> Void
+    let onOpenSettings: () -> Void; let onOpenTutorial: () -> Void; let onUpdateBoardEmptyState: (Bool) -> Void; let onRequestChangeSize: (Int) -> Void
 
     @StateObject private var game: GoGameViewModel
     @State private var hoverPoint: Point? = nil
@@ -77,10 +133,10 @@ struct GameScreen: View {
     @State private var showFileAlert = false
 
     
-    init(size: Int, boardPixelSize: CGFloat, showCoordinates: Bool, showStarPoints: Bool, showHoverGhost: Bool, showLastMoveMark: Bool, useWoodBackground: Bool, onOpenSettings: @escaping () -> Void, onUpdateBoardEmptyState: @escaping (Bool) -> Void, onRequestChangeSize: @escaping (Int) -> Void) {
+    init(size: Int, boardPixelSize: CGFloat, showCoordinates: Bool, showStarPoints: Bool, showHoverGhost: Bool, showLastMoveMark: Bool, useWoodBackground: Bool, onOpenSettings: @escaping () -> Void, onOpenTutorial: @escaping () -> Void, onUpdateBoardEmptyState: @escaping (Bool) -> Void, onRequestChangeSize: @escaping (Int) -> Void) {
         self.size = size; self.boardPixelSize = boardPixelSize
         self.showCoordinates = showCoordinates; self.showStarPoints = showStarPoints; self.showHoverGhost = showHoverGhost; self.showLastMoveMark = showLastMoveMark; self.useWoodBackground = useWoodBackground
-        self.onOpenSettings = onOpenSettings; self.onUpdateBoardEmptyState = onUpdateBoardEmptyState; self.onRequestChangeSize = onRequestChangeSize
+        self.onOpenSettings = onOpenSettings; self.onOpenTutorial = onOpenTutorial; self.onUpdateBoardEmptyState = onUpdateBoardEmptyState; self.onRequestChangeSize = onRequestChangeSize
         _game = StateObject(wrappedValue: GoGameViewModel(size: size))
     }
 
@@ -240,6 +296,10 @@ struct GameScreen: View {
             }
 
             Section("训练") {
+                Button(action: onOpenTutorial) {
+                    Label("围棋入门", systemImage: "graduationcap")
+                }
+
                 Button(action: { showTsumegoSheet = true }) {
                     Label("死活题训练", systemImage: "scope")
                 }
