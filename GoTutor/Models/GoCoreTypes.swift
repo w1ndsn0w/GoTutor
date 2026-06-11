@@ -132,6 +132,8 @@ struct KataGoResponse: Codable, Sendable {
     let id: String?
     let turnNumber: Int?
     let ownership: [Double]?
+    let policy: [Double]?
+    let humanPolicy: [Double]?
     let rootInfo: RootInfo?
     let moveInfos: [MoveInfo]?
     
@@ -142,8 +144,15 @@ struct KataGoResponse: Codable, Sendable {
     
     struct MoveInfo: Codable, Sendable {
         let move: String
+        let order: Int?
+        let visits: Int?
+        let edgeVisits: Int?
+        let prior: Double?
+        let humanPrior: Double?
         let winrate: Double?
         let scoreLead: Double?
+        let scoreMean: Double?
+        let scoreStdev: Double?
         let pv: [String]?
     }
 }
@@ -154,6 +163,29 @@ struct CandidateMove: Codable, Equatable, Sendable {
     let scoreLead: Double
     let pv: [String]
     let order: Int
+    let prior: Double?
+    let humanPrior: Double?
+    let visits: Int?
+
+    init(
+        move: String,
+        winrate: Double,
+        scoreLead: Double,
+        pv: [String],
+        order: Int,
+        prior: Double? = nil,
+        humanPrior: Double? = nil,
+        visits: Int? = nil
+    ) {
+        self.move = move
+        self.winrate = winrate
+        self.scoreLead = scoreLead
+        self.pv = pv
+        self.order = order
+        self.prior = prior
+        self.humanPrior = humanPrior
+        self.visits = visits
+    }
 }
 
 extension SavedGame {

@@ -232,8 +232,44 @@ final class GoGameViewModel: ObservableObject {
             engineStatusMessage = "找不到模型文件或 analysis.cfg 配置"
             return
         }
-        engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath)
+        let humanModelPath = Self.bundledHumanSLModelPath()
+        if let humanModelPath {
+            print("找到 HumanSL 模型，准备加载：\(humanModelPath)")
+        } else {
+            print("未找到 HumanSL 模型，使用普通 KataGo 模式")
+        }
+        engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath, humanModel: humanModelPath)
         isEngineReady = true
+    }
+
+    private static func bundledHumanSLModelPath() -> String? {
+        let exactResourceName = "b18c384nbt-humanv0"
+        let candidateDirectories: [String?] = [
+            "Models/HumanSL",
+            "Resources/Models/HumanSL",
+            nil
+        ]
+
+        for directory in candidateDirectories {
+            if let path = Bundle.main.path(forResource: exactResourceName, ofType: "bin.gz", inDirectory: directory) {
+                return path
+            }
+        }
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: Bundle.main.bundleURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        for case let url as URL in enumerator {
+            let fileName = url.lastPathComponent.lowercased()
+            if fileName.hasSuffix(".bin.gz"), fileName.contains("human") {
+                return url.path
+            }
+        }
+
+        return nil
     }
 
     private func ensureEngineStarted() -> Bool {
@@ -280,15 +316,18 @@ final class GoGameViewModel: ObservableObject {
                     
                     // 2. 提取前 3 名，组装成你极其强大的 CandidateMove
                     for (index, moveInfo) in moveInfos.prefix(3).enumerated() {
-                        if let mWr = moveInfo.winrate, let mSl = moveInfo.scoreLead {
-                            candidates.append(CandidateMove(
-                                move: moveInfo.move, // 直接存字母坐标，如 "D4"
-                                winrate: mWr,
-                                scoreLead: mSl,
-                                pv: moveInfo.pv ?? [], // 顺手把未来变化图也存了！
-                                order: index + 1
-                            ))
-                        }
+                        let candidateWinrate = moveInfo.winrate ?? wr
+                        let candidateScoreLead = moveInfo.scoreLead ?? sl
+                        candidates.append(CandidateMove(
+                            move: moveInfo.move, // 直接存字母坐标，如 "D4"
+                            winrate: candidateWinrate,
+                            scoreLead: candidateScoreLead,
+                            pv: moveInfo.pv ?? [], // 顺手把未来变化图也存了！
+                            order: moveInfo.order ?? index + 1,
+                            prior: moveInfo.prior,
+                            humanPrior: moveInfo.humanPrior,
+                            visits: moveInfo.visits ?? moveInfo.edgeVisits
+                        ))
                     }
                 }
                 
@@ -738,9 +777,7 @@ final class GoGameViewModel: ObservableObject {
     }
     
     // MARK: - 网络请求
-    private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
-        guard ensureEngineStarted() else { return }
-
+    private func makeGTPMoveHistory() -> [[String]] {
         var gtpMoves: [[String]] = []
         for move in moves {
             let playerStr = move.player == .black ? "B" : "W"
@@ -749,6 +786,42 @@ final class GoGameViewModel: ObservableObject {
             case .pass: gtpMoves.append([playerStr, "pass"])
             }
         }
+        return gtpMoves
+    }
+
+    @discardableResult
+    func sendDebugHumanSLQuery(profile: String = "rank_5k", maxVisits: Int = 10) -> Bool {
+        guard ensureEngineStarted() else { return false }
+        let humanSLProfile = profile.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !humanSLProfile.isEmpty else { return false }
+
+        let queryDict: [String: Any] = [
+            "id": "\(gameId)_human_test_\(humanSLProfile)",
+            "rules": "japanese",
+            "komi": 6.5,
+            "boardXSize": size,
+            "boardYSize": size,
+            "moves": makeGTPMoveHistory(),
+            "maxVisits": maxVisits,
+            "includePolicy": true,
+            "overrideSettings": [
+                "humanSLProfile": humanSLProfile
+            ]
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            return false
+        }
+
+        aiEngine.sendQuery(jsonString)
+        return true
+    }
+
+    private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
+        guard ensureEngineStarted() else { return }
+
+        let gtpMoves = makeGTPMoveHistory()
         
         // 🚨 修正：此处保持 query 格式，并戴上身份证 gameId
         let queryDict: [String: Any] = [
@@ -783,14 +856,7 @@ final class GoGameViewModel: ObservableObject {
         }
         guard ensureEngineStarted() else { return }
 
-        var gtpMoves: [[String]] = []
-        for move in moves {
-            let playerStr = move.player == .black ? "B" : "W"
-            switch move.kind {
-            case .place(let p): gtpMoves.append([playerStr, p.toGTP(boardSize: size)])
-            case .pass: gtpMoves.append([playerStr, "pass"])
-            }
-        }
+        let gtpMoves = makeGTPMoveHistory()
         
         expectedBatchResponses = analyzeTurns.count
         receivedBatchResponses = 0

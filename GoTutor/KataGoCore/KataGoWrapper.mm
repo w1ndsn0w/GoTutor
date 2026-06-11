@@ -26,16 +26,23 @@ namespace MainCmds {
     return instance;
 }
 
-- (NSString *)setEngineWithModel:(NSString *)modelPath config:(NSString *)configPath {
-    // 【防撞车锁】：如果引擎已经启动了，直接返回成功，绝对不再动管道！
-    static BOOL isEngineStarted = NO;
-    if (isEngineStarted) return @"引擎已在后台运行中...";
-    isEngineStarted = YES;
-    
+- (NSString *)setEngineWithModel:(NSString *)modelPath
+                           config:(NSString *)configPath
+                       humanModel:(nullable NSString *)humanModelPath {
     std::string cppModel = [modelPath UTF8String];
     std::string cppConfig = [configPath UTF8String];
     
     if (cppModel.empty() || cppConfig.empty()) return @"路径为空！";
+
+    // 【防撞车锁】：如果引擎已经启动了，直接返回成功，绝对不再动管道！
+    static BOOL isEngineStarted = NO;
+    if (isEngineStarted) return @"引擎已在后台运行中...";
+    isEngineStarted = YES;
+
+    NSString *trimmedHumanModelPath = [humanModelPath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    BOOL hasHumanModel = trimmedHumanModelPath.length > 0
+        && [[NSFileManager defaultManager] fileExistsAtPath:trimmedHumanModelPath];
+    std::string cppHumanModel = hasHumanModel ? [trimmedHumanModelPath UTF8String] : "";
     
     NSString *docPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     chdir([docPath UTF8String]);
@@ -51,6 +58,10 @@ namespace MainCmds {
         "-model", cppModel,
         "-config", cppConfig
     };
+    if (!cppHumanModel.empty()) {
+        args.push_back("-human-model");
+        args.push_back(cppHumanModel);
+    }
     
 #if TARGET_OS_SIMULATOR
     return @"[UI预览模式] 已屏蔽底层 C++ 引擎。";
@@ -86,7 +97,7 @@ namespace MainCmds {
         }
     });
     
-    return @"JSON Analysis 引擎初始化中...";
+    return hasHumanModel ? @"JSON Analysis 引擎初始化中（HumanSL 已启用）..." : @"JSON Analysis 引擎初始化中...";
 #endif
 }
 
