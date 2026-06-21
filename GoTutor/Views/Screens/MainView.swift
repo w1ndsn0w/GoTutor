@@ -126,6 +126,7 @@ struct GameScreen: View {
     @State private var showSaveSheet = false
     @State private var showTsumegoSheet = false
     @State private var showPurePlayMode = false
+    @State private var showRankEstimateReport = false
     @State private var saveTitle = ""
     @State private var saveBlackPlayerName = ""
     @State private var saveWhitePlayerName = ""
@@ -228,6 +229,9 @@ struct GameScreen: View {
                 showLastMoveMark: showLastMoveMark,
                 useWoodBackground: useWoodBackground
             )
+        }
+        .sheet(isPresented: $showRankEstimateReport) {
+            RankEstimateReportView(game: game)
         }
         .alert("文件操作", isPresented: $showFileAlert) {
             Button("确定", role: .cancel) { }
@@ -408,6 +412,11 @@ struct GameScreen: View {
                 Toggle("导师点评", isOn: $game.isTutorMode)
                 Toggle("实时形势", isOn: $game.showRealTimeTerritory)
                 Toggle("终局结算", isOn: $game.isEndGameScoring)
+
+                Button(action: { showRankEstimateReport = true }) {
+                    Label("棋力测评", systemImage: "chart.line.uptrend.xyaxis")
+                }
+                .disabled(game.moves.isEmpty)
             }
         } label: {
             Label("辅助", systemImage: "slider.horizontal.3")

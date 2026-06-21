@@ -7,6 +7,7 @@ struct ReviewView: View {
     // 复盘页面拥有一个独立的“大脑”
     @StateObject private var game = GoGameViewModel()
     @State private var phaseClassifier = GamePhaseClassifier(totalMoves: 0, boardSize: 19)
+    @State private var showRankEstimateReport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +63,11 @@ struct ReviewView: View {
         .onChange(of: game.analysisProgress) { _, _ in
             refreshPhaseClassifier()
         }
+        .sheet(isPresented: $showRankEstimateReport) {
+            RankEstimateReportView(game: game, onSelectTurn: { turn in
+                game.setTurn(turn)
+            })
+        }
     }
 
     private var headerBar: some View {
@@ -83,6 +89,12 @@ struct ReviewView: View {
             }
 
             Spacer()
+
+            Button(action: { showRankEstimateReport = true }) {
+                Label("棋力测评", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            .buttonStyle(HeaderButtonStyle())
+            .disabled(game.moves.isEmpty)
 
             reviewProgressPill
         }

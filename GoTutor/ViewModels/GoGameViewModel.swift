@@ -17,14 +17,14 @@ enum AIBattleDifficulty: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .beginner20k: return "启蒙 20级"
-        case .kyu10: return "级位 10级"
-        case .amateur1d: return "业余初段"
-        case .amateur3d: return "业余3段"
-        case .amateur5d: return "业余5段"
+        case .beginner20k: return "业余1段"
+        case .kyu10: return "业余2段"
+        case .amateur1d: return "业余3段"
+        case .amateur3d: return "业余5段"
+        case .amateur5d: return "业余8段"
         case .pro1p: return "职业初段"
-        case .pro5p: return "职业5段"
-        case .pro9p: return "职业9段"
+        case .pro5p: return "职业五段"
+        case .pro9p: return "职业九段"
         }
     }
 
@@ -50,6 +50,20 @@ enum AIBattleDifficulty: String, CaseIterable, Identifiable, Sendable {
 
         let openingScale = moveCount < max(10, boardSize) ? 1.25 : 1.0
         return max(4, Int(Double(base) * boardScale * openingScale))
+    }
+}
+
+private struct RankHumanSLQuery {
+    let id: String
+    let profile: String
+    let turn: Int
+    let playedMove: String
+}
+
+private extension Array where Element == Double {
+    var average: Double {
+        guard !isEmpty else { return 0 }
+        return reduce(0, +) / Double(count)
     }
 }
 
@@ -172,6 +186,8 @@ final class GoGameViewModel: ObservableObject {
     @Published private(set) var engineStatusMessage: String? = nil
     @Published private(set) var isAIThinking: Bool = false
     @Published private(set) var isHintThinking: Bool = false
+    @Published private(set) var isHumanSLAvailable: Bool = false
+    @Published private(set) var rankEstimateState: RankEstimateRunState = .idle
     
     private var snapshots: [GameSnapshot] = []
     private var positionHistory: Set<String> = []
@@ -183,8 +199,8 @@ final class GoGameViewModel: ObservableObject {
     private var reviewPlayback = ReviewPlaybackState()
     private(set) var reviewPanelState: ReviewPanelState = .empty
     
-    // 【核心】接入单例引擎
-    private let aiEngine = KataGoWrapper.shared()
+    // 【核心】接入模型总线
+    private let modelBus = KataGoModelBus.shared
     private var latestOwnership: [Double]? = nil
     private var analysisTimer: DispatchWorkItem?
     private var expectedBatchResponses = 0
@@ -192,8 +208,10 @@ final class GoGameViewModel: ObservableObject {
     private var completedBatchResponsesAtStart = 0
     private var notificationTask: Task<Void, Never>?
     private var aiMoveTask: Task<Void, Never>?
+    private var rankEstimationTask: Task<Void, Never>?
     private var pendingAIAnalysisTurn: Int? = nil
     private var pendingHintAnalysisTurn: Int? = nil
+    private var rankHumanSLResponses: [String: KataGoResponse] = [:]
 
     var isAITurn: Bool {
         isAIBattleMode && currentPlayer == aiPlayerColor && !isGameOver && !isReviewMode
@@ -222,6 +240,7 @@ final class GoGameViewModel: ObservableObject {
     
     deinit {
         notificationTask?.cancel()
+        rankEstimationTask?.cancel()
     }
     
     // MARK: - 引擎管理
@@ -238,7 +257,8 @@ final class GoGameViewModel: ObservableObject {
         } else {
             print("未找到 HumanSL 模型，使用普通 KataGo 模式")
         }
-        engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath, humanModel: humanModelPath)
+        isHumanSLAvailable = humanModelPath != nil
+        engineStatusMessage = modelBus.startEngine(modelPath: modelPath, configPath: configPath, humanModelPath: humanModelPath)
         isEngineReady = true
     }
 
@@ -284,57 +304,37 @@ final class GoGameViewModel: ObservableObject {
             let response = try JSONDecoder().decode(KataGoResponse.self, from: data)
             
             // 核心防御网：必须带着我的专属 UUID，否则丢弃数据
-            guard let responseId = response.id, responseId.hasPrefix(self.gameId) else { return }
+            guard let responseId = response.id,
+                  let route = AnalysisResponseRoute(responseId: responseId, gameId: self.gameId) else { return }
             
             let turn = response.turnNumber ?? 0
+
+            if case .rankHumanSLMatch = route.kind {
+                self.rankHumanSLResponses[responseId] = response
+                return
+            }
 
             let shouldScheduleAIMove = self.isAIBattleMode
                 && turn == self.currentTurn
                 && self.currentPlayer == self.aiPlayerColor
                 && response.moveInfos?.first?.move != nil
 
-            if responseId.contains("_query_"), self.pendingAIAnalysisTurn == turn {
+            if case .primaryQuery = route.kind, self.pendingAIAnalysisTurn == turn {
                 self.pendingAIAnalysisTurn = nil
                 if !shouldScheduleAIMove {
                     self.isAIThinking = false
                 }
             }
-            if responseId.contains("_human_hint_"), self.pendingHintAnalysisTurn == turn {
+            if case .coachHint = route.kind, self.pendingHintAnalysisTurn == turn {
                 self.pendingHintAnalysisTurn = nil
                 self.isHintThinking = false
             }
             
-            if let info = response.rootInfo, let wr = info.winrate, let sl = info.scoreLead {
-                var bestMovePt: Point? = nil
-                var candidates: [CandidateMove] = []
-                
-                if let moveInfos = response.moveInfos {
-                    // 1. 提取第一名作为 bestMove
-                    if let bestMoveStr = moveInfos.first?.move {
-                        bestMovePt = Point(gtp: bestMoveStr, boardSize: self.size)
-                    }
-                    
-                    // 2. 提取前 3 名，组装成你极其强大的 CandidateMove
-                    for (index, moveInfo) in moveInfos.prefix(3).enumerated() {
-                        let candidateWinrate = moveInfo.winrate ?? wr
-                        let candidateScoreLead = moveInfo.scoreLead ?? sl
-                        candidates.append(CandidateMove(
-                            move: moveInfo.move, // 直接存字母坐标，如 "D4"
-                            winrate: candidateWinrate,
-                            scoreLead: candidateScoreLead,
-                            pv: moveInfo.pv ?? [], // 顺手把未来变化图也存了！
-                            order: moveInfo.order ?? index + 1,
-                            prior: moveInfo.prior,
-                            humanPrior: moveInfo.humanPrior,
-                            visits: moveInfo.visits ?? moveInfo.edgeVisits
-                        ))
-                    }
-                }
-                
-                self.moveAnalyses[turn] = MoveAnalysis(winrate: wr, scoreLead: sl, ownership: response.ownership, bestMove: bestMovePt, candidateMoves: candidates)
+            if let analysis = KataGoResponseMapper.moveAnalysis(from: response, boardSize: self.size) {
+                self.moveAnalyses[turn] = analysis
             }
 
-            if responseId.hasSuffix("batch_review") {
+            if case .reviewBatch = route.kind {
                 self.receivedBatchResponses += 1
                 let total = max(1, self.completedBatchResponsesAtStart + self.expectedBatchResponses)
                 let completed = self.completedBatchResponsesAtStart + self.receivedBatchResponses
@@ -777,9 +777,10 @@ final class GoGameViewModel: ObservableObject {
     }
     
     // MARK: - 网络请求
-    private func makeGTPMoveHistory() -> [[String]] {
+    private func makeGTPMoveHistory(upTo moveCount: Int? = nil) -> [[String]] {
         var gtpMoves: [[String]] = []
-        for move in moves {
+        let safeMoveCount = max(0, min(moveCount ?? moves.count, moves.count))
+        for move in moves.prefix(safeMoveCount) {
             let playerStr = move.player == .black ? "B" : "W"
             switch move.kind {
             case .place(let p): gtpMoves.append([playerStr, p.toGTP(boardSize: size)])
@@ -789,54 +790,230 @@ final class GoGameViewModel: ObservableObject {
         return gtpMoves
     }
 
+    private func makeAnalysisQueryContext() -> AnalysisQueryContext {
+        AnalysisQueryContext(
+            gameId: gameId,
+            boardSize: size,
+            gtpMoves: makeGTPMoveHistory(),
+            currentTurn: moves.count
+        )
+    }
+
+    private func makeAnalysisQueryContext(upTo moveCount: Int) -> AnalysisQueryContext {
+        let safeMoveCount = max(0, min(moveCount, moves.count))
+        return AnalysisQueryContext(
+            gameId: gameId,
+            boardSize: size,
+            gtpMoves: makeGTPMoveHistory(upTo: safeMoveCount),
+            currentTurn: safeMoveCount
+        )
+    }
+
+    func startRankEstimation(targetPlayer: Stone) {
+        rankEstimationTask?.cancel()
+        rankHumanSLResponses.removeAll()
+        rankEstimateState = .running(progress: 0.02, message: "准备棋力测评...")
+        rankEstimationTask = Task { [weak self] in
+            await self?.runRankEstimation(targetPlayer: targetPlayer)
+        }
+    }
+
+    func cancelRankEstimation() {
+        rankEstimationTask?.cancel()
+        rankEstimationTask = nil
+        if case .running = rankEstimateState {
+            rankEstimateState = .idle
+        }
+    }
+
+    private func runRankEstimation(targetPlayer: Stone) async {
+        guard !moves.isEmpty else {
+            rankEstimateState = .failed("当前还没有棋谱，至少需要一盘棋才能进行测评。")
+            return
+        }
+        guard ensureEngineStarted() else {
+            rankEstimateState = .failed(engineStatusMessage ?? "KataGo 引擎未能启动，暂时无法测评。")
+            return
+        }
+
+        rankEstimateState = .running(progress: 0.08, message: "正在补齐 KataGo 粗分析...")
+        await ensureRankBaselineAnalysis()
+
+        let humanSLAvailableForRun = isHumanSLAvailable
+        var humanSLTimedOut = false
+        var profileScores: [ProfileScore] = []
+        if humanSLAvailableForRun {
+            rankEstimateState = .running(progress: 0.50, message: "正在抽样 HumanSL profile...")
+            let result = await collectHumanSLProfileScores(targetPlayer: targetPlayer)
+            profileScores = result.scores
+            humanSLTimedOut = result.timedOut
+        }
+
+        rankEstimateState = .running(progress: 0.92, message: "正在生成测评报告...")
+        let report = RankEstimateAnalyzer.makeReport(
+            targetPlayer: targetPlayer,
+            moves: moves,
+            analyses: moveAnalyses,
+            boardSize: size,
+            profileScores: profileScores,
+            humanSLAvailable: humanSLAvailableForRun,
+            humanSLTimedOut: humanSLTimedOut
+        )
+        rankEstimateState = .completed(report)
+    }
+
+    private func ensureRankBaselineAnalysis() async {
+        let requiredTurns = Set(0...moves.count)
+        var missingTurns = requiredTurns.filter { moveAnalyses[$0] == nil }.sorted()
+        guard !missingTurns.isEmpty else {
+            rankEstimateState = .running(progress: 0.42, message: "已复用现有 KataGo 分析缓存")
+            return
+        }
+
+        _ = modelBus.send(
+            .rankBaseline(analyzeTurns: missingTurns, maxVisits: rankBaselineMaxVisits),
+            context: makeAnalysisQueryContext()
+        )
+
+        let start = Date()
+        let timeout: TimeInterval = max(18, min(60, Double(missingTurns.count) * 0.45))
+        while Date().timeIntervalSince(start) < timeout {
+            if Task.isCancelled { return }
+            missingTurns = requiredTurns.filter { moveAnalyses[$0] == nil }.sorted()
+            let completed = requiredTurns.count - missingTurns.count
+            let progress = 0.10 + 0.32 * (Double(completed) / Double(max(1, requiredTurns.count)))
+            rankEstimateState = .running(progress: progress, message: "KataGo 粗分析 \(completed)/\(requiredTurns.count)")
+            if missingTurns.isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        let analyzedCount = requiredTurns.count - missingTurns.count
+        rankEstimateState = .running(progress: 0.42, message: "KataGo 粗分析超时，使用已完成的 \(analyzedCount) 个局面继续")
+    }
+
+    private func collectHumanSLProfileScores(targetPlayer: Stone) async -> (scores: [ProfileScore], timedOut: Bool) {
+        let targetTurns = RankEstimateAnalyzer.humanSLTargetTurns(targetPlayer: targetPlayer, moves: moves)
+        guard !targetTurns.isEmpty else { return ([], false) }
+
+        let profiles = RankEstimateAnalyzer.supportedHumanSLProfiles
+        let totalPlanned = targetTurns.count * profiles.count
+        var completed = 0
+        var timedOut = false
+        var disabledProfiles: Set<String> = []
+        var relativeScoresByProfile: [String: [Double]] = [:]
+
+        for turn in targetTurns {
+            guard moves.indices.contains(turn - 1) else { continue }
+            let playedMove = gtpString(for: moves[turn - 1], boardSize: size)
+            var rawScoresForTurn: [String: Double] = [:]
+
+            for profile in profiles {
+                if disabledProfiles.contains(profile) {
+                    completed += 1
+                    continue
+                }
+                if Task.isCancelled { return ([], true) }
+                rankEstimateState = .running(
+                    progress: 0.50 + 0.34 * (Double(completed) / Double(max(1, totalPlanned))),
+                    message: "HumanSL 全盘对比 \(completed)/\(totalPlanned)"
+                )
+
+                let descriptor = AnalysisTaskDescriptor.rankHumanSLMatch(profile: profile, targetTurn: turn, maxVisits: 1)
+                let requestID = "\(gameId)_rank_humansl_\(turn)_\(profile)"
+                rankHumanSLResponses.removeValue(forKey: requestID)
+                guard let request = modelBus.send(
+                    descriptor,
+                    context: makeAnalysisQueryContext(upTo: turn - 1)
+                ) else {
+                    completed += 1
+                    continue
+                }
+
+                let query = RankHumanSLQuery(id: request.id, profile: profile, turn: turn, playedMove: playedMove)
+                guard let response = await waitForRankHumanSLResponse(query: query, timeout: 2.8) else {
+                    timedOut = true
+                    disabledProfiles.insert(profile)
+                    completed += 1
+                    continue
+                }
+
+                if let rawScore = KataGoModelBus.humanMoveSimilarity(from: response, playedMove: playedMove, boardSize: size) {
+                    rawScoresForTurn[profile] = max(rawScore, 0.000000001)
+                }
+                completed += 1
+            }
+
+            guard !rawScoresForTurn.isEmpty else {
+                continue
+            }
+
+            let maxLogScore = rawScoresForTurn.values.map { log($0) }.max() ?? 0
+            for (profile, rawScore) in rawScoresForTurn {
+                let relativeScore = exp(log(rawScore) - maxLogScore)
+                relativeScoresByProfile[profile, default: []].append(min(1.0, max(0.0, relativeScore)))
+            }
+        }
+
+        rankEstimateState = .running(progress: 0.84, message: "HumanSL 全盘对比 \(completed)/\(totalPlanned)")
+
+        let profileScores = relativeScoresByProfile.map { profile, scores in
+            ProfileScore(
+                profile: profile,
+                similarityScore: scores.average,
+                sampleCount: scores.count
+            )
+        }
+
+        return (profileScores, timedOut || profileScores.isEmpty)
+    }
+
+    private func waitForRankHumanSLResponse(query: RankHumanSLQuery, timeout: TimeInterval) async -> KataGoResponse? {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if Task.isCancelled { return nil }
+            if let response = rankHumanSLResponses.removeValue(forKey: query.id) {
+                return response
+            }
+            try? await Task.sleep(for: .milliseconds(120))
+        }
+        return nil
+    }
+
+    private var rankBaselineMaxVisits: Int {
+        switch size {
+        case 9: return 16
+        case 13: return 24
+        default: return 32
+        }
+    }
+
+    private func gtpString(for move: Move, boardSize: Int) -> String {
+        switch move.kind {
+        case .place(let point): return point.toGTP(boardSize: boardSize)
+        case .pass: return "pass"
+        }
+    }
+
     @discardableResult
     func sendDebugHumanSLQuery(profile: String = "rank_5k", maxVisits: Int = 10) -> Bool {
         guard ensureEngineStarted() else { return false }
         let humanSLProfile = profile.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !humanSLProfile.isEmpty else { return false }
 
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_human_test_\(humanSLProfile)",
-            "rules": "japanese",
-            "komi": 6.5,
-            "boardXSize": size,
-            "boardYSize": size,
-            "moves": makeGTPMoveHistory(),
-            "maxVisits": maxVisits,
-            "includePolicy": true,
-            "overrideSettings": [
-                "humanSLProfile": humanSLProfile
-            ]
-        ]
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return false
-        }
-
-        aiEngine.sendQuery(jsonString)
-        return true
+        return modelBus.send(
+            .humanSLDebug(profile: humanSLProfile, maxVisits: maxVisits),
+            context: makeAnalysisQueryContext()
+        ) != nil
     }
 
     private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
         guard ensureEngineStarted() else { return }
 
-        let gtpMoves = makeGTPMoveHistory()
-        
-        // 🚨 修正：此处保持 query 格式，并戴上身份证 gameId
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_\(idSuffix)_\(moves.count)",
-            "moves": gtpMoves,
-            "rules": "chinese",
-            "boardXSize": size,
-            "boardYSize": size,
-            "analyzeTurns": [gtpMoves.count],
-            "maxVisits": maxVisits,
-            "includeOwnership": includeOwnership
-        ]
-        
-        if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
+        let descriptor: AnalysisTaskDescriptor = idSuffix == "human_hint"
+            ? .coachHint(maxVisits: maxVisits, includeOwnership: includeOwnership)
+            : .primaryAnalysis(maxVisits: maxVisits, includeOwnership: includeOwnership)
+
+        if modelBus.send(descriptor, context: makeAnalysisQueryContext()) != nil {
             if idSuffix == "query", isAIBattleMode, currentPlayer == aiPlayerColor {
                 pendingAIAnalysisTurn = moves.count
                 isAIThinking = true
@@ -844,7 +1021,6 @@ final class GoGameViewModel: ObservableObject {
                 pendingHintAnalysisTurn = moves.count
                 isHintThinking = true
             }
-            aiEngine.sendQuery(jsonString)
         }
     }
     
@@ -856,30 +1032,16 @@ final class GoGameViewModel: ObservableObject {
         }
         guard ensureEngineStarted() else { return }
 
-        let gtpMoves = makeGTPMoveHistory()
-        
         expectedBatchResponses = analyzeTurns.count
         receivedBatchResponses = 0
         completedBatchResponsesAtStart = completedAtStart
         let total = max(1, completedAtStart + analyzeTurns.count)
         analysisProgress = Double(completedAtStart) / Double(total)
-        
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_batch_review",
-            "moves": gtpMoves,
-            "rules": "chinese",
-            "boardXSize": size,
-            "boardYSize": size,
-            "analyzeTurns": analyzeTurns,
-            "maxVisits": highRankReviewMaxVisits,
-            "includeOwnership": true,
-            "includePolicy": true
-        ]
-        
-        if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            aiEngine.sendQuery(jsonString)
-        }
+
+        modelBus.send(
+            .reviewBatch(analyzeTurns: analyzeTurns, maxVisits: highRankReviewMaxVisits),
+            context: makeAnalysisQueryContext()
+        )
     }
 
     private var highRankReviewMaxVisits: Int {
