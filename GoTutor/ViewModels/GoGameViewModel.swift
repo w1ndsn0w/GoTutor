@@ -183,8 +183,8 @@ final class GoGameViewModel: ObservableObject {
     private var reviewPlayback = ReviewPlaybackState()
     private(set) var reviewPanelState: ReviewPanelState = .empty
     
-    // 【核心】接入单例引擎
-    private let aiEngine = KataGoWrapper.shared()
+    // 【核心】接入模型总线
+    private let modelBus = KataGoModelBus.shared
     private var latestOwnership: [Double]? = nil
     private var analysisTimer: DispatchWorkItem?
     private var expectedBatchResponses = 0
@@ -238,7 +238,7 @@ final class GoGameViewModel: ObservableObject {
         } else {
             print("未找到 HumanSL 模型，使用普通 KataGo 模式")
         }
-        engineStatusMessage = aiEngine.setEngineWithModel(modelPath, config: configPath, humanModel: humanModelPath)
+        engineStatusMessage = modelBus.startEngine(modelPath: modelPath, configPath: configPath, humanModelPath: humanModelPath)
         isEngineReady = true
     }
 
@@ -284,7 +284,8 @@ final class GoGameViewModel: ObservableObject {
             let response = try JSONDecoder().decode(KataGoResponse.self, from: data)
             
             // 核心防御网：必须带着我的专属 UUID，否则丢弃数据
-            guard let responseId = response.id, responseId.hasPrefix(self.gameId) else { return }
+            guard let responseId = response.id,
+                  let route = AnalysisResponseRoute(responseId: responseId, gameId: self.gameId) else { return }
             
             let turn = response.turnNumber ?? 0
 
@@ -293,48 +294,22 @@ final class GoGameViewModel: ObservableObject {
                 && self.currentPlayer == self.aiPlayerColor
                 && response.moveInfos?.first?.move != nil
 
-            if responseId.contains("_query_"), self.pendingAIAnalysisTurn == turn {
+            if case .primaryQuery = route.kind, self.pendingAIAnalysisTurn == turn {
                 self.pendingAIAnalysisTurn = nil
                 if !shouldScheduleAIMove {
                     self.isAIThinking = false
                 }
             }
-            if responseId.contains("_human_hint_"), self.pendingHintAnalysisTurn == turn {
+            if case .coachHint = route.kind, self.pendingHintAnalysisTurn == turn {
                 self.pendingHintAnalysisTurn = nil
                 self.isHintThinking = false
             }
             
-            if let info = response.rootInfo, let wr = info.winrate, let sl = info.scoreLead {
-                var bestMovePt: Point? = nil
-                var candidates: [CandidateMove] = []
-                
-                if let moveInfos = response.moveInfos {
-                    // 1. 提取第一名作为 bestMove
-                    if let bestMoveStr = moveInfos.first?.move {
-                        bestMovePt = Point(gtp: bestMoveStr, boardSize: self.size)
-                    }
-                    
-                    // 2. 提取前 3 名，组装成你极其强大的 CandidateMove
-                    for (index, moveInfo) in moveInfos.prefix(3).enumerated() {
-                        let candidateWinrate = moveInfo.winrate ?? wr
-                        let candidateScoreLead = moveInfo.scoreLead ?? sl
-                        candidates.append(CandidateMove(
-                            move: moveInfo.move, // 直接存字母坐标，如 "D4"
-                            winrate: candidateWinrate,
-                            scoreLead: candidateScoreLead,
-                            pv: moveInfo.pv ?? [], // 顺手把未来变化图也存了！
-                            order: moveInfo.order ?? index + 1,
-                            prior: moveInfo.prior,
-                            humanPrior: moveInfo.humanPrior,
-                            visits: moveInfo.visits ?? moveInfo.edgeVisits
-                        ))
-                    }
-                }
-                
-                self.moveAnalyses[turn] = MoveAnalysis(winrate: wr, scoreLead: sl, ownership: response.ownership, bestMove: bestMovePt, candidateMoves: candidates)
+            if let analysis = KataGoResponseMapper.moveAnalysis(from: response, boardSize: self.size) {
+                self.moveAnalyses[turn] = analysis
             }
 
-            if responseId.hasSuffix("batch_review") {
+            if case .reviewBatch = route.kind {
                 self.receivedBatchResponses += 1
                 let total = max(1, self.completedBatchResponsesAtStart + self.expectedBatchResponses)
                 let completed = self.completedBatchResponsesAtStart + self.receivedBatchResponses
@@ -789,54 +764,35 @@ final class GoGameViewModel: ObservableObject {
         return gtpMoves
     }
 
+    private func makeAnalysisQueryContext() -> AnalysisQueryContext {
+        AnalysisQueryContext(
+            gameId: gameId,
+            boardSize: size,
+            gtpMoves: makeGTPMoveHistory(),
+            currentTurn: moves.count
+        )
+    }
+
     @discardableResult
     func sendDebugHumanSLQuery(profile: String = "rank_5k", maxVisits: Int = 10) -> Bool {
         guard ensureEngineStarted() else { return false }
         let humanSLProfile = profile.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !humanSLProfile.isEmpty else { return false }
 
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_human_test_\(humanSLProfile)",
-            "rules": "japanese",
-            "komi": 6.5,
-            "boardXSize": size,
-            "boardYSize": size,
-            "moves": makeGTPMoveHistory(),
-            "maxVisits": maxVisits,
-            "includePolicy": true,
-            "overrideSettings": [
-                "humanSLProfile": humanSLProfile
-            ]
-        ]
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return false
-        }
-
-        aiEngine.sendQuery(jsonString)
-        return true
+        return modelBus.send(
+            .humanSLDebug(profile: humanSLProfile, maxVisits: maxVisits),
+            context: makeAnalysisQueryContext()
+        ) != nil
     }
 
     private func requestSingleAnalysis(maxVisits: Int = 50, includeOwnership: Bool = true, idSuffix: String = "query") {
         guard ensureEngineStarted() else { return }
 
-        let gtpMoves = makeGTPMoveHistory()
-        
-        // 🚨 修正：此处保持 query 格式，并戴上身份证 gameId
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_\(idSuffix)_\(moves.count)",
-            "moves": gtpMoves,
-            "rules": "chinese",
-            "boardXSize": size,
-            "boardYSize": size,
-            "analyzeTurns": [gtpMoves.count],
-            "maxVisits": maxVisits,
-            "includeOwnership": includeOwnership
-        ]
-        
-        if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
+        let descriptor: AnalysisTaskDescriptor = idSuffix == "human_hint"
+            ? .coachHint(maxVisits: maxVisits, includeOwnership: includeOwnership)
+            : .primaryAnalysis(maxVisits: maxVisits, includeOwnership: includeOwnership)
+
+        if modelBus.send(descriptor, context: makeAnalysisQueryContext()) != nil {
             if idSuffix == "query", isAIBattleMode, currentPlayer == aiPlayerColor {
                 pendingAIAnalysisTurn = moves.count
                 isAIThinking = true
@@ -844,7 +800,6 @@ final class GoGameViewModel: ObservableObject {
                 pendingHintAnalysisTurn = moves.count
                 isHintThinking = true
             }
-            aiEngine.sendQuery(jsonString)
         }
     }
     
@@ -856,30 +811,16 @@ final class GoGameViewModel: ObservableObject {
         }
         guard ensureEngineStarted() else { return }
 
-        let gtpMoves = makeGTPMoveHistory()
-        
         expectedBatchResponses = analyzeTurns.count
         receivedBatchResponses = 0
         completedBatchResponsesAtStart = completedAtStart
         let total = max(1, completedAtStart + analyzeTurns.count)
         analysisProgress = Double(completedAtStart) / Double(total)
-        
-        let queryDict: [String: Any] = [
-            "id": "\(gameId)_batch_review",
-            "moves": gtpMoves,
-            "rules": "chinese",
-            "boardXSize": size,
-            "boardYSize": size,
-            "analyzeTurns": analyzeTurns,
-            "maxVisits": highRankReviewMaxVisits,
-            "includeOwnership": true,
-            "includePolicy": true
-        ]
-        
-        if let jsonData = try? JSONSerialization.data(withJSONObject: queryDict),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            aiEngine.sendQuery(jsonString)
-        }
+
+        modelBus.send(
+            .reviewBatch(analyzeTurns: analyzeTurns, maxVisits: highRankReviewMaxVisits),
+            context: makeAnalysisQueryContext()
+        )
     }
 
     private var highRankReviewMaxVisits: Int {
